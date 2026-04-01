@@ -3,7 +3,7 @@
 
 __author__  = "CiferrC"
 __license__ = "MIT"
-__version__ = "0.0.4"
+__version__ = "0.0.5"
 
 import re
 import json
@@ -18,10 +18,11 @@ import httpx
 import numpy as np
 import librosa
 from xml.sax.saxutils import escape
-from difflib import SequenceMatcher
+from rapidfuzz import fuzz as _fuzz
 from pydantic import BaseModel, Field
-from platformdirs import user_cache_dir
+from platformdirs import user_cache_dir, user_log_dir
 from diskcache import Cache
+from loguru import logger
 from tenacity import (
     retry,
     stop_after_attempt,
@@ -86,6 +87,25 @@ _TTL_API_DAYS    = 7    # respuestas de AnimeThemes/Jikan se cachean 7 días
 _TTL_THEMES_DAYS = 30   # metadatos de temas se cachean 30 días
 
 # ─────────────────────────────────────────────
+#  LOGGING (loguru)
+# ─────────────────────────────────────────────
+
+_LOG_DIR = Path(user_log_dir("ChapteriZen"))
+_LOG_DIR.mkdir(parents=True, exist_ok=True)
+
+# Quitar el sink de stderr por defecto y añadir solo el archivo rotativo.
+# La GUI muestra los logs a través de las señales Qt — no necesitamos stderr.
+logger.remove()
+logger.add(
+    _LOG_DIR / "chapterizen_{time:YYYY-MM-DD}.log",
+    rotation="1 day",       # un archivo por día
+    retention="14 days",    # conservar 2 semanas
+    encoding="utf-8",
+    level="DEBUG",
+    format="{time:HH:mm:ss} | {level:<8} | {message}",
+)
+
+# ─────────────────────────────────────────────
 #  REINTENTOS (tenacity)
 # ─────────────────────────────────────────────
 
@@ -115,7 +135,7 @@ ANIMETHEMES_ANIME  = "https://api.animethemes.moe/anime"
 JIKAN_ANIME        = "https://api.jikan.moe/v4/anime"
 JIKAN_REL          = "https://api.jikan.moe/v4/anime/{id}/relations"
 
-VIDEO_EXTS    = (".mkv", ".mp4", ".avi", ".webm", ".mov", ".m2ts")
+VIDEO_EXTS    = (".mkv", ".mp4", ".avi", ".webm", ".mov", ".m2ts", ".ts", ".wmv", ".vob")
 OP_WINDOW_SEC = 300
 ED_WINDOW_SEC = 300
 
@@ -372,12 +392,12 @@ def construir_mapa_mostrar_temas(anime_json: dict) -> Dict[str, str]:
         ]
         if not titulo or not artistas:
             continue
-        por      = ", ".join(artistas)
+        artista  = ", ".join(artistas)
         etiqueta = None
         if slug_tema.upper().startswith("OP"):
-            etiqueta = f'Opening: "{titulo}" por {por}'
+            etiqueta = f'Opening: "{titulo}" por {artista}'
         elif slug_tema.upper().startswith("ED"):
-            etiqueta = f'Ending: "{titulo}" por {por}'
+            etiqueta = f'Ending: "{titulo}" por {artista}'
         if etiqueta:
             salida[slug_tema]     = etiqueta
             salida[slug_tema_raw] = etiqueta
@@ -385,9 +405,10 @@ def construir_mapa_mostrar_temas(anime_json: dict) -> Dict[str, str]:
 
 def nombre_archivo_seguro(name: str) -> str:
     s = str(name)
-    s = re.sub(r'"([^"]+)"', r'"\1"', s)
+    s = re.sub(r'"(?=\w)', "\u201c", s)   # " antes de palabra → "
+    s = re.sub(r'(?<=\w)"', "\u201d", s)  # " después de palabra → "
     s = s.replace(":", "꞉").replace("?", "？")
-    s = re.sub(r'[<>:/\\|?*\x00-\x1F]+', "_", s)
+    s = re.sub(r'[<>/\\|*\x00-\x1F]+', "_", s)
     s = re.sub(r"\s+", " ", s).strip(" .")
     return s
 
@@ -521,16 +542,23 @@ def construir_cache_temas(slug: str, anime_json: dict, log) -> Path:
 # ─────────────────────────────────────────────
 
 # Pesos del score final (configurables)
-_W_DTW = 0.80
-_W_FFT = 0.20
+_W_DTW = 0.70
+_W_FFT = 0.30
 
 # Parámetros de extracción de features
 _SR_FEATURES  = 16000   # tasa de muestreo (ya usamos 16kHz)
 _HOP_LENGTH   = 512     # hop para MFCC/chroma (~32ms a 16kHz)
 _N_MFCC       = 20
-_TOP_K_FFT    = 3       # cuántos candidatos pasan a DTW
-_USE_CHROMA   = True    # False para deshabilitar chroma (más robusto con diálogo encima)
+_TOP_K_FFT     = 3       # cuántos candidatos pasan a DTW
+_FFT_PRUNING_MIN = 0.08  # early pruning: si el mejor FFT score < esto, saltar DTW
+_USE_CHROMA    = True    # False para deshabilitar chroma (más robusto con diálogo encima)
 _CHROMA_WEIGHT = 0.8    # peso relativo de chroma vs MFCC (1.0 = igual peso)
+
+# Ventana deslizante para búsqueda de OP/ED
+_SLIDE_WIN_SEC  = 90    # duración de cada ventana de comparación (segundos)
+_SLIDE_STEP_SEC = 15    # paso entre ventanas (segundos) — overlap del 83%
+_SLIDE_OP_MAX   = 300   # cuántos segundos del inicio explorar para el OP
+_SLIDE_ED_MAX   = 300   # cuántos segundos del final explorar para el ED
 
 # ── helpers scipy opcionales ──────────────────
 
@@ -645,7 +673,9 @@ def _fft_score(
 
     pico       = float(valida.max())
     idx        = int(valida.argmax())
-    score_norm = pico / float(M)
+    # Normalización suave: mapea [0,∞) → [0,1) preservando diferencias relativas
+    score_raw  = pico / float(M)
+    score_norm = score_raw / (1.0 + score_raw)
 
     desfase_seg  = max(0.0, (idx - silencio) / hz_sub)
     dur_tema_seg = len(th) / hz_sub
@@ -1055,7 +1085,8 @@ def _aceptar_canon_sin_perder_tokens(base: str, canon: str) -> bool:
     return len(missing) == 0
 
 def _ratio(a: str, b: str) -> float:
-    return SequenceMatcher(None, a, b).ratio()
+    # rapidfuzz devuelve 0–100, normalizamos a 0–1
+    return _fuzz.ratio(a, b) / 100.0
 
 def _jikan_text_score(q: str, item: dict) -> float:
     qn = _normalizar_titulo(q)
@@ -1089,6 +1120,7 @@ def extraer_temporada_y_episodio_desde_nombre_archivo(
     name           = Path(ruta_video).name
     temporada_text = _extraer_temporada_textual(name)
 
+    # 1. Patrón explícito SxxExx o xxXxx (máxima prioridad)
     for pat, grps in [
         (r"(?i)\bS(\d{1,2})E(\d{1,3})(?:v\d+)?\b", (1, 2)),
         (r"(?i)\b(\d{1,2})x(\d{1,3})\b",            (1, 2)),
@@ -1100,6 +1132,7 @@ def extraer_temporada_y_episodio_desde_nombre_archivo(
             except Exception:
                 pass
 
+    # 2. Patrón explícito Exx / EPxx
     m = re.search(r"(?i)\b(?:EP?|E)\s*(\d{1,3})(?:v\d+)?\b", name)
     if m:
         try:
@@ -1107,12 +1140,29 @@ def extraer_temporada_y_episodio_desde_nombre_archivo(
         except Exception:
             pass
 
-    base    = Path(ruta_video).stem
-    cleaned = _limpiar_nombre_release(base)
-    m       = re.search(r"(?i)(?:^|[\s._-])(\d{1,3})(?:v\d+)?(?:$|[\s._-])", cleaned)
+    # 3. Número al final precedido de " - " o " " (regla de oro: el episodio
+    #    casi siempre está al final del nombre, no en medio del título).
+    #    Se busca antes de limpiar el nombre para preservar la posición relativa.
+    stem = Path(ruta_video).stem
+    m = re.search(r"(?:^|[\s._-])-\s*(\d{1,3})(?:v\d+)?(?:\s*[\[\(]|$)", stem)
+    if not m:
+        # Guión espacio número al final, estilo "Serie Name - 06 [tag]"
+        m = re.search(r"-\s+(\d{1,3})(?:v\d+)?(?:\s|$|\[|\()", stem)
     if m:
         try:
             ep = int(m.group(1))
+            if 1 <= ep <= 399:
+                return temporada_text, ep
+        except Exception:
+            pass
+
+    # 4. Último recurso: limpiar el nombre y tomar el último número visible
+    #    (no el primero, para evitar agarrar números del título como "Slave 2")
+    cleaned = _limpiar_nombre_release(stem)
+    numeros = re.findall(r"(?:^|[\s._-])(\d{1,3})(?:v\d+)?(?:$|[\s._-])", cleaned)
+    for ep_str in reversed(numeros):   # de derecha a izquierda
+        try:
+            ep = int(ep_str)
             if 1 <= ep <= 399:
                 return temporada_text, ep
         except Exception:
@@ -1307,6 +1357,12 @@ class ResolverWorker(QThread):
 
     def _log(self, s: str):
         self.log.emit(s)
+        if s.startswith("  - ⚠️") or s.startswith("⚠️"):
+            logger.warning(s)
+        elif s.startswith("❌"):
+            logger.error(s)
+        else:
+            logger.info(s)
 
     def run(self):
         try:
@@ -1319,14 +1375,14 @@ class ResolverWorker(QThread):
             episodio      = int(ep or 0)
             temporada     = 1 if temporada is None else int(temporada)
 
-            self._log("• ResolverWorker: parse filename…")
+            self._log("• ResolverWorker: analizando nombre de archivo…")
             self.progress.emit(5)
             log_clv(self._log, "parsed", temporada=temporada, episodio=episodio)
 
             override = (p.search_override or "").strip()
             if override:
                 consulta_base = override
-                self._log("• Usando search-name (override) desde GUI…")
+                self._log("• Usando nombre de búsqueda (anulación) desde interfaz…")
                 log_clv(self._log, "override", q=consulta_base)
             else:
                 consulta_base  = inferir_consulta_desde_nombre_archivo(video)
@@ -1344,7 +1400,7 @@ class ResolverWorker(QThread):
 
                 if temporada >= 2 and picked_base:
                     try:
-                        self._log("• Jikan (resolver sequel season)…")
+                        self._log("• Jikan (resolviendo temporada secuela)…")
                         picked_season = jikan_resolver_temporada_por_sequel(picked_base, temporada)
                         canon_season  = (
                             (picked_season.get("title") or "").strip()
@@ -1354,11 +1410,11 @@ class ResolverWorker(QThread):
                             consulta_base = canon_season
                         else:
                             self._log(
-                                f"  - ⚠️ Ignoro canon season por recorte: "
+                                f"  - ⚠️ Ignorando canon de temporada por recorte: "
                                 f"{consulta_base!r} → {canon_season!r}"
                             )
                     except Exception as e:
-                        self._log(f"  - ⚠️ Sequel falló: {e}. Usando canon base si disponible.")
+                        self._log(f"  - ⚠️ Secuela falló: {e}. Usando canon base si está disponible.")
                         if ok_base and canon_base and _aceptar_canon_sin_perder_tokens(consulta_base, canon_base):
                             consulta_base = canon_base
                 else:
@@ -1384,7 +1440,7 @@ class ResolverWorker(QThread):
             self.failed.emit(str(e))
 
     def _resolver_slug_con_picker(self, consulta: str, temporada: int) -> Tuple[str, str]:
-        self._log("• AnimeThemes (resolver slug)…")
+        self._log("• AnimeThemes (resolviendo slug)…")
         resultados = buscar_anime_en_animethemes(consulta)
         resultados = filtrar_por_token_obligatorio(consulta, resultados)
         raw        = list(resultados)
@@ -1448,7 +1504,7 @@ class ResolverWorker(QThread):
         return slug, name
 
     def _resolver_via_jikan_con_picker(self, consulta: str) -> Tuple[str, str]:
-        self._log("• Fallback: Jikan…")
+        self._log("• Respaldo: Jikan…")
         resultados = jikan_buscar_anime(consulta, limite=10)
         if not resultados:
             raise RuntimeError("Jikan no devolvió resultados.")
@@ -1542,6 +1598,12 @@ class ChapterizerWorker(QThread):
 
     def _log(self, s: str):
         self.log.emit(s)
+        if s.startswith("  - ⚠️") or s.startswith("⚠️"):
+            logger.warning(s)
+        elif s.startswith("❌"):
+            logger.error(s)
+        else:
+            logger.info(s)
 
     def run(self):
         try:
@@ -1566,20 +1628,20 @@ class ChapterizerWorker(QThread):
                 titulo_anime=titulo_usado,
                 episodio=episodio,
             )
-            self._log(f"• Salida: {ruta_salida}")
+            self._log(f"• Archivo de salida: {ruta_salida}")
 
             if not p.usar_exacto:
                 chapters = chapters_heuristicos(dur)
                 guardar_chapters(ruta_salida, chapters)
                 self.progress.emit(100)
-                self._log(f"✅ Listo (heurístico): {ruta_salida}")
+                self._log(f"✅ Completado (heurístico): {ruta_salida}")
                 self.terminado.emit(ruta_salida)
                 return
 
             if not slug:
                 raise RuntimeError(
                     "Slug vacío. La serie no fue resuelta en el hilo principal "
-                    "(no se puede hacer matching exacto sin AnimeThemes)."
+                    "(no se puede hacer coincidencia exacta sin AnimeThemes)."
                 )
 
             series_dir = _THEMES_DIR / nombre_archivo_seguro(slug)
@@ -1594,65 +1656,83 @@ class ChapterizerWorker(QThread):
 
             wav_dir = construir_cache_temas(slug, anime_json, self._log)
 
+            wavs_temas: List[Tuple[str, Path]] = [
+                (ruta.stem, ruta)
+                for ruta in sorted(wav_dir.glob("*.wav"))
+                if ruta.stem.upper().startswith(("OP", "ED"))
+            ]
+
+            if not wavs_temas:
+                raise RuntimeError(
+                    "No encontré WAVs de OP/ED en caché. "
+                    "(¿AnimeThemes no trae audios?)"
+                )
+
+            self._log("• Búsqueda con ventana deslizante…")
+            self.progress.emit(55)
+
+            # ── Extraer audio de las zonas UNA sola vez ──────────────────
+            op_zona_inicio = 0.0
+            op_zona_fin    = min(_SLIDE_OP_MAX, dur * 0.6)
+            ed_zona_inicio = max(0.0, dur - _SLIDE_ED_MAX)
+            ed_zona_fin    = dur
+
             with tempfile.TemporaryDirectory() as dir_tmp:
-                tmp    = Path(dir_tmp)
-                op_dur = min(OP_WINDOW_SEC, dur)
-                ed_ss  = max(0.0, dur - ED_WINDOW_SEC)
-                ed_dur = dur - ed_ss
+                tmp = Path(dir_tmp)
+
+                op_wav = str(tmp / "zona_op.wav")
+                ed_wav = str(tmp / "zona_ed.wav")
 
                 self._log(
-                    f"• Extrayendo segmento OP (0→{op_dur:.0f}s) y "
-                    f"ED ({ed_ss:.0f}→{dur:.0f}s)…"
+                    f"  Extrayendo zona OP ({op_zona_inicio:.0f}s→{op_zona_fin:.0f}s) "
+                    f"y ED ({ed_zona_inicio:.0f}s→{ed_zona_fin:.0f}s)…"
                 )
-                self.progress.emit(55)
-
-                op_wav = str(tmp / "ep_op.wav")
-                ed_wav = str(tmp / "ep_ed.wav")
-
-                extraer_audio_wav_mono_16k(video, op_wav, ss=0,     duracion=op_dur)
-                extraer_audio_wav_mono_16k(video, ed_wav, ss=ed_ss, duracion=ed_dur)
+                extraer_audio_wav_mono_16k(
+                    video, op_wav,
+                    ss=op_zona_inicio,
+                    duracion=op_zona_fin - op_zona_inicio,
+                )
+                extraer_audio_wav_mono_16k(
+                    video, ed_wav,
+                    ss=ed_zona_inicio,
+                    duracion=ed_zona_fin - ed_zona_inicio,
+                )
 
                 y_op, hz_op = leer_pcm16_mono_wav(op_wav)
                 y_ed, hz_ed = leer_pcm16_mono_wav(ed_wav)
 
-                wavs_temas: List[Tuple[str, Path]] = [
-                    (ruta.stem, ruta)
-                    for ruta in sorted(wav_dir.glob("*.wav"))
-                    if ruta.stem.upper().startswith(("OP", "ED"))
-                ]
+            # ── Extraer features globales de cada zona ────────────────────
+            self._log("  Extrayendo features OP y ED…")
+            feat_op = obtener_features_con_cache(y_op, hz_op)
+            feat_ed = obtener_features_con_cache(y_ed, hz_ed)
 
-                if not wavs_temas:
-                    raise RuntimeError(
-                        "No encontré WAVs de OP/ED en caché. "
-                        "(¿AnimeThemes no trae audios?)"
-                    )
+            mejor_op = self._buscar_con_ventana(
+                y_zona=y_op, feat_zona=feat_op, hz=hz_op,
+                wavs_temas=wavs_temas, objetivo="OP",
+                zona_offset=op_zona_inicio,
+                zona_dur=op_zona_fin - op_zona_inicio,
+                params=p,
+            )
+            self.progress.emit(82)
 
-                self._log("• Coincidencia exacta (correlación)…")
-                self.progress.emit(70)
+            mejor_ed_raw = self._buscar_con_ventana(
+                y_zona=y_ed, feat_zona=feat_ed, hz=hz_ed,
+                wavs_temas=wavs_temas, objetivo="ED",
+                zona_offset=ed_zona_inicio,
+                zona_dur=ed_zona_fin - ed_zona_inicio,
+                params=p,
+            )
+            self.progress.emit(90)
 
-                mejor_op = mejor_coincidencia(
-                    wavs_temas, y_op, hz_op, "OP",
-                    p.submuestreo, p.porcion_theme, p.puntuacion_minima, self._log,
-                )
-                mejor_ed_raw = mejor_coincidencia(
-                    wavs_temas, y_ed, hz_ed, "ED",
-                    p.submuestreo, p.porcion_theme, p.puntuacion_minima, self._log,
-                )
-                mejor_ed: Optional[ResultadoCoincidencia] = None
-                if mejor_ed_raw:
-                    mejor_ed = ResultadoCoincidencia(
-                        nombre_tema=mejor_ed_raw.nombre_tema,
-                        inicio=mejor_ed_raw.inicio + ed_ss,
-                        fin=mejor_ed_raw.fin + ed_ss,
-                        puntuacion=mejor_ed_raw.puntuacion,
-                    )
+            # Con ventana deslizante los tiempos ya son absolutos del episodio
+            mejor_ed: Optional[ResultadoCoincidencia] = mejor_ed_raw
 
-            PRE_OP  = "Prólogo"
+            PRE_OP  = "Introducción"
             EPISODE = "Episodio"
-            POST_ED = "Epílogo"
+            POST_ED = "Conclusión"
 
             if not mejor_op and not mejor_ed:
-                self._log("⚠️ No pude matchear OP/ED. Usando modo heurístico.")
+                self._log("⚠️ No pude coincidir con OP/ED. Usando modo heurístico.")
                 chapters = chapters_heuristicos(dur)
             else:
                 marcas_tiempo: List[float] = []
@@ -1714,6 +1794,241 @@ class ChapterizerWorker(QThread):
 
 # ─────────────────────────────────────────────
 #  GUI
+    def _buscar_con_ventana(
+        self,
+        y_zona:      np.ndarray,         # PCM completo de la zona (samples)
+        feat_zona:   np.ndarray,         # features globales (n_feat, T_zona)
+        hz:          int,
+        wavs_temas:  List[Tuple[str, Path]],
+        objetivo:    str,
+        zona_offset: float,              # segundos absolutos del inicio de la zona
+        zona_dur:    float,              # duración de la zona en segundos
+        params,
+    ) -> Optional[ResultadoCoincidencia]:
+        """
+        Ventana deslizante sobre la zona indicada — sin llamadas a ffmpeg.
+        El audio PCM y las features ya están en memoria; cada ventana es
+        un slice de arrays, lo que elimina ~40 procesos ffmpeg por episodio.
+
+        Conversiones de unidades:
+          segundos → samples  : s * hz
+          segundos → frames   : int(s * hz / _HOP_LENGTH)
+          frames   → segundos : f * _HOP_LENGTH / hz
+        """
+        mejor:     Optional[ResultadoCoincidencia] = None
+        zona_dur_s = zona_dur
+        n_ventanas = max(1, int((zona_dur_s - _SLIDE_WIN_SEC) / _SLIDE_STEP_SEC) + 1)
+
+        self._log(
+            f"  [{objetivo}] Ventana deslizante: zona {zona_offset:.0f}s→"
+            f"{zona_offset + zona_dur_s:.0f}s "
+            f"| win={_SLIDE_WIN_SEC}s step={_SLIDE_STEP_SEC}s ({n_ventanas} ventanas)"
+        )
+
+        win_samples  = int(_SLIDE_WIN_SEC * hz)
+        step_samples = int(_SLIDE_STEP_SEC * hz)
+
+        # Mínimo de frames: mayor entre 8s absolutos y 25% del tema más corto.
+        # 8s es más flexible que 10s para OPs/EDs cortos o recortados.
+        # 25% del tema es suficiente para que DTW tenga contexto real sin ser tan
+        # restrictivo como el 30% anterior.
+        min_frames_absoluto = int(8 * hz / _HOP_LENGTH)
+        frames_tema_min = min_frames_absoluto
+        for nombre_t, ruta_t in wavs_temas:
+            if not nombre_t.upper().startswith(objetivo):
+                continue
+            try:
+                y_t, hz_t = leer_pcm16_mono_wav(str(ruta_t))
+                frames_t = int(len(y_t) * (hz / hz_t) / _HOP_LENGTH)
+                frames_tema_min = min(frames_tema_min, int(0.25 * frames_t))
+            except Exception:
+                pass
+        min_frames_win = max(min_frames_absoluto, frames_tema_min)
+
+        for paso, s_inicio_raw in enumerate(range(0, int(zona_dur_s * hz) - win_samples + 1, step_samples)):
+
+            # ── Coherencia frame↔sample ───────────────────────────────────
+            f_inicio = int(round(s_inicio_raw / _HOP_LENGTH))
+            s_inicio = f_inicio * _HOP_LENGTH
+
+            # ── Clamps ────────────────────────────────────────────────────
+            f_fin = min(f_inicio + int(win_samples / _HOP_LENGTH), feat_zona.shape[1])
+            s_fin = min(s_inicio + win_samples,                    len(y_zona))
+
+            # ── Validar ventana no vacía ──────────────────────────────────
+            # Puede ocurrir si f_inicio >= feat_zona.shape[1] tras el clamp.
+            if f_fin <= f_inicio or s_fin <= s_inicio:
+                continue
+
+            # ── Filtro de ventana mínima ──────────────────────────────────
+            if (f_fin - f_inicio) < min_frames_win:
+                continue
+
+            # ── Slices en memoria — sin ffmpeg ────────────────────────────
+            y_win    = y_zona[s_inicio:s_fin]
+            feat_win = feat_zona[:, f_inicio:f_fin]
+
+            # Offset absoluto de esta ventana en el episodio
+            ss_abs = zona_offset + s_inicio / hz
+
+            res = self._coincidencia_con_features(
+                y_win=y_win,
+                feat_win=feat_win,
+                hz=hz,
+                wavs_temas=wavs_temas,
+                objetivo=objetivo,
+                params=params,
+            )
+
+            if res is not None:
+                abs_res = ResultadoCoincidencia(
+                    nombre_tema=res.nombre_tema,
+                    inicio=res.inicio + ss_abs,
+                    fin=res.fin   + ss_abs,
+                    puntuacion=res.puntuacion,
+                )
+                self._log(
+                    f"    ✓ win{paso} ({ss_abs:.0f}s): {abs_res.nombre_tema} "
+                    f"{formatear_tiempo(abs_res.inicio)}→{formatear_tiempo(abs_res.fin)} "
+                    f"score={abs_res.puntuacion:.3f}"
+                )
+                if mejor is None or abs_res.puntuacion > mejor.puntuacion:
+                    mejor = abs_res
+
+        if mejor:
+            self._log(
+                f"  ✓ [{objetivo}] Mejor global: {mejor.nombre_tema} "
+                f"{formatear_tiempo(mejor.inicio)}→{formatear_tiempo(mejor.fin)} "
+                f"(score={mejor.puntuacion:.3f})"
+            )
+        else:
+            self._log(f"  ✗ [{objetivo}] Sin coincidencia en ninguna ventana.")
+
+        return mejor
+
+    def _coincidencia_con_features(
+        self,
+        y_win:      np.ndarray,          # PCM de la ventana (para FFT)
+        feat_win:   np.ndarray,          # features de la ventana (para DTW)
+        hz:         int,
+        wavs_temas: List[Tuple[str, Path]],
+        objetivo:   str,
+        params,
+    ) -> Optional[ResultadoCoincidencia]:
+        """
+        Pipeline FFT→DTW para una sola ventana.
+        Separa la lógica de matching del slicing para mantener claridad
+        de unidades: y_win son samples, feat_win son frames.
+        """
+        candidatos_fft: List[Tuple[str, Path, np.ndarray, float, float, float]] = []
+
+        for nombre, ruta_wav in wavs_temas:
+            if not nombre.upper().startswith(objetivo):
+                continue
+
+            y_th, hz_tema = leer_pcm16_mono_wav(str(ruta_wav))
+
+            if hz_tema != hz:
+                razon     = hz / hz_tema
+                nuevo_len = int(len(y_th) * razon)
+                x_orig    = np.linspace(0, len(y_th) - 1, len(y_th))
+                x_nuevo   = np.linspace(0, len(y_th) - 1, nuevo_len)
+                y_th      = np.interp(x_nuevo, x_orig, y_th).astype(np.float32)
+
+            res_fft = _fft_score(
+                y_win, y_th, hz,
+                submuestreo=params.submuestreo,
+                porcion_theme=params.porcion_theme,
+            )
+            if res_fft is None:
+                continue
+
+            inicio_fft, fin_fft, fft_s = res_fft
+            candidatos_fft.append((nombre, ruta_wav, y_th, inicio_fft, fin_fft, fft_s))
+
+        if not candidatos_fft:
+            return None
+
+        candidatos_fft.sort(key=lambda c: c[5], reverse=True)
+        candidatos_top = candidatos_fft[:_TOP_K_FFT]
+
+        # ── Early pruning con threshold spread-aware ─────────────────────
+        # En lugar de solo el percentil 25, usamos p25 + 0.5 * spread (IQR).
+        # Esto detecta si hay un candidato que destaca del resto:
+        #   - Si todos los scores son similares y bajos → spread pequeño,
+        #     threshold sube y filtra la ventana (todos malos por igual).
+        #   - Si un candidato destaca → spread grande, threshold no lo bloquea.
+        # Más robusto que percentil fijo ante audios con distintos niveles de señal.
+        fft_scores   = [c[5] for c in candidatos_top]
+        p25          = float(np.percentile(fft_scores, 25))
+        p75          = float(np.percentile(fft_scores, 75))
+        spread       = p75 - p25
+        thr_dinamico = max(_FFT_PRUNING_MIN, p25 + 0.5 * spread)
+        mejor_fft_s  = candidatos_top[0][5]
+
+        logger.debug(
+            f"FFT max={mejor_fft_s:.3f} p25={p25:.3f} p75={p75:.3f} "
+            f"spread={spread:.3f} threshold={thr_dinamico:.3f}"
+        )
+
+        if mejor_fft_s < thr_dinamico:
+            return None
+
+        self._log(
+            f"  → Top-{len(candidatos_top)} candidatos FFT: "
+            + ", ".join(f"{c[0]}({c[5]:.3f})" for c in candidatos_top)
+        )
+
+        # DTW usa el slice de features ya calculado — sin re-extraer
+        mejor: Optional[ResultadoCoincidencia] = None
+        mejor_score = -1.0
+
+        for nombre, ruta_wav, y_th, inicio_fft, fin_fft, fft_s in candidatos_top:
+            try:
+                feat_th   = obtener_features_con_cache(y_th, hz)
+                dtw_costo = _dtw_score(feat_win, feat_th)
+                dtw_s     = max(0.0, 1.0 - dtw_costo / 50.0)
+                score_final = _W_DTW * dtw_s + _W_FFT * fft_s
+
+                self._log(
+                    f"  - {nombre}: DTW={dtw_costo:.2f} dtw_s={dtw_s:.3f} "
+                    f"fft_s={fft_s:.3f} → score={score_final:.3f}"
+                )
+
+                if score_final < params.puntuacion_minima:
+                    self._log(f"    ↳ descartado (score {score_final:.3f} < umbral {params.puntuacion_minima})")
+                    continue
+
+                if score_final > mejor_score:
+                    mejor_score = score_final
+                    mejor       = ResultadoCoincidencia(
+                        nombre_tema=nombre,
+                        inicio=inicio_fft,
+                        fin=fin_fft,
+                        puntuacion=score_final,
+                    )
+
+            except Exception as e:
+                self._log(f"  - ⚠️ {nombre}: error en DTW ({e}), usando FFT como respaldo")
+                if fft_s >= params.puntuacion_minima and fft_s > mejor_score:
+                    mejor_score = fft_s
+                    mejor       = ResultadoCoincidencia(
+                        nombre_tema=nombre,
+                        inicio=inicio_fft,
+                        fin=fin_fft,
+                        puntuacion=fft_s,
+                    )
+
+        if mejor:
+            self._log(
+                f"  ✓ Mejor: {mejor.nombre_tema} "
+                f"{formatear_tiempo(mejor.inicio)}→{formatear_tiempo(mejor.fin)} "
+                f"(score={mejor.puntuacion:.3f})"
+            )
+
+        return mejor
+
+
 # ─────────────────────────────────────────────
 
 STYLE = """
@@ -1949,7 +2264,7 @@ class VentanaPrincipal(QMainWindow):
         sep2.setObjectName("separator")
         root.addWidget(sep2)
 
-        self.btn_run = QPushButton("Generar .xml")
+        self.btn_run = QPushButton("Generar XML")
         self.btn_run.setObjectName("run")
         self.btn_run.clicked.connect(self.iniciar)
         root.addWidget(self.btn_run, alignment=Qt.AlignmentFlag.AlignHCenter)
@@ -1989,7 +2304,7 @@ class VentanaPrincipal(QMainWindow):
     def elegir_video(self):
         fp, _ = QFileDialog.getOpenFileName(
             self, "Selecciona un video", "",
-            "Videos (*.mkv *.mp4 *.avi *.webm *.mov *.m2ts);;Todos (*.*)",
+            "Videos (*.mkv *.mp4 *.avi *.webm *.mov *.m2ts *.ts *.wmv *.vob);;Todos (*.*)",
         )
         if fp:
             self.row_video.set(fp)
@@ -2041,7 +2356,7 @@ class VentanaPrincipal(QMainWindow):
             self._resolver.entregar_pick(idx)
 
     def _on_resolved_params(self, params: ParametrosTrabajo):
-        self._agregar_log("• Resolución completa. Iniciando matching/chapters…")
+        self._agregar_log("• Resolución completa. Iniciando coincidencia/capítulos…")
         self._worker = ChapterizerWorker(self, params)
         self._worker.log.connect(self._agregar_log)
         self._worker.progress.connect(self.progress.setValue)

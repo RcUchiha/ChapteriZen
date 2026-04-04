@@ -3,13 +3,14 @@
 
 __author__  = "CiferrC"
 __license__ = "MIT"
-__version__ = "0.0.5"
+__version__ = "0.0.6"
 
 import re
 import json
 import hashlib
 import tempfile
 import subprocess
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional, Tuple, List, Dict
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -52,6 +53,21 @@ from PyQt6.QtWidgets import (
     QFrame,
     QProgressBar,
 )
+
+# Parsers de nombres de archivo de anime (aniparse principal, anitopy fallback)
+try:
+    import aniparse as _aniparse
+    _ANIPARSE_OK = True
+except ImportError:
+    _aniparse    = None
+    _ANIPARSE_OK = False
+
+try:
+    import anitopy as _anitopy
+    _ANITOPY_OK = True
+except ImportError:
+    _anitopy    = None
+    _ANITOPY_OK = False
 
 # scipy es opcional: si está disponible se usa para FFT más rápida
 try:
@@ -135,13 +151,39 @@ ANIMETHEMES_ANIME  = "https://api.animethemes.moe/anime"
 JIKAN_ANIME        = "https://api.jikan.moe/v4/anime"
 JIKAN_REL          = "https://api.jikan.moe/v4/anime/{id}/relations"
 
-VIDEO_EXTS    = (".mkv", ".mp4", ".avi", ".webm", ".mov", ".m2ts", ".ts", ".wmv", ".vob")
-OP_WINDOW_SEC = 300
-ED_WINDOW_SEC = 300
+VIDEO_EXTS = (".mkv", ".mp4", ".avi", ".webm", ".mov", ".m2ts", ".ts", ".wmv", ".vob")
 
 # ─────────────────────────────────────────────
 #  MODELOS PYDANTIC
 # ─────────────────────────────────────────────
+
+@dataclass
+class ParsedAnime:
+    """Resultado normalizado del parseo de un nombre de archivo de anime."""
+    titulo:    str           # título limpio, listo para consultar Jikan
+    temporada: Optional[int] # None si no se detectó
+    episodio:  Optional[int] # None si no se detectó
+    fuente:    str           # "aniparse" | "anitopy" | "merge" | "regex"
+
+
+@dataclass
+class TemaAudio:
+    """Audio de un tema OP/ED precargado en memoria, listo para matching."""
+    nombre:   str
+    audio:    "np.ndarray"
+    hz:       int
+    frames:   int          # len(audio) // _HOP_LENGTH — precalculado
+    features: "np.ndarray" # MFCC + chroma precalculados — evita recalcular en cada ventana
+
+
+@dataclass
+class CandidatoFFT:
+    """Resultado de la fase FFT para un tema candidato."""
+    tema:      "TemaAudio" # referencia al tema original — sin copiar arrays
+    inicio:    float       # segundos en la ventana
+    fin:       float       # segundos en la ventana
+    score_fft: float
+
 
 class AnimeDetectado(BaseModel):
     titulo:     str
@@ -697,120 +739,6 @@ def _dtw_score(feat_ep: np.ndarray, feat_th: np.ndarray) -> float:
     )
     return float(D[-1, wp[-1, 1]]) / max(1, len(wp))
 
-# ── pipeline principal ────────────────────────
-
-def mejor_coincidencia(
-    wavs_temas:        List[Tuple[str, Path]],
-    y_ep:              np.ndarray,
-    hz:                int,
-    objetivo:          str,
-    submuestreo:       int,
-    porcion_theme:     float,
-    puntuacion_minima: float,
-    log,
-) -> Optional[ResultadoCoincidencia]:
-    """
-    Pipeline híbrido:
-      1. FFT rápida sobre todos los temas → top-K por score (sin umbral fijo)
-      2. Extracción de features (MFCC + chroma opcional) con caché en diskcache
-      3. DTW con subseq=True sobre los top-K candidatos
-      4. Score final = W_DTW * dtw_score + W_FFT * fft_score
-    """
-    # ── paso 1: FFT → top-K candidatos ───────
-    candidatos_fft: List[Tuple[str, Path, np.ndarray, float, float, float]] = []
-
-    for nombre, ruta_wav in wavs_temas:
-        if not nombre.upper().startswith(objetivo):
-            continue
-
-        y_th, hz_tema = leer_pcm16_mono_wav(str(ruta_wav))
-
-        if hz_tema != hz:
-            log(f"  - ⚠️ {nombre}: resampleando {hz_tema}Hz → {hz}Hz…")
-            razon     = hz / hz_tema
-            nuevo_len = int(len(y_th) * razon)
-            x_orig    = np.linspace(0, len(y_th) - 1, len(y_th))
-            x_nuevo   = np.linspace(0, len(y_th) - 1, nuevo_len)
-            y_th      = np.interp(x_nuevo, x_orig, y_th).astype(np.float32)
-
-        res_fft = _fft_score(
-            y_ep, y_th, hz,
-            submuestreo=submuestreo,
-            porcion_theme=porcion_theme,
-        )
-        if res_fft is None:
-            log(f"  - {nombre}: audio demasiado corto, descartado")
-            continue
-
-        inicio_fft, fin_fft, fft_s = res_fft
-        candidatos_fft.append((nombre, ruta_wav, y_th, inicio_fft, fin_fft, fft_s))
-
-    if not candidatos_fft:
-        return None
-
-    # Ordenar por fft_score desc y quedarse con top-K (sin umbral fijo)
-    candidatos_fft.sort(key=lambda c: c[5], reverse=True)
-    candidatos_top = candidatos_fft[:_TOP_K_FFT]
-
-    log(
-        f"  → Top-{len(candidatos_top)} candidatos FFT: "
-        + ", ".join(f"{c[0]}({c[5]:.3f})" for c in candidatos_top)
-    )
-
-    # ── paso 2: features del episodio ────────
-    feat_ep = obtener_features_con_cache(y_ep, hz)
-
-    # ── paso 3: DTW sobre candidatos ─────────
-    mejor: Optional[ResultadoCoincidencia] = None
-    mejor_score = -1.0
-
-    for nombre, ruta_wav, y_th, inicio_fft, fin_fft, fft_s in candidatos_top:
-        try:
-            feat_th   = obtener_features_con_cache(y_th, hz)
-            dtw_costo = _dtw_score(feat_ep, feat_th)
-
-            # Invertir y acotar: menor costo → mayor score
-            dtw_s       = max(0.0, 1.0 - dtw_costo / 50.0)
-            score_final = _W_DTW * dtw_s + _W_FFT * fft_s
-
-            log(
-                f"  - {nombre}: DTW={dtw_costo:.2f} dtw_s={dtw_s:.3f} "
-                f"fft_s={fft_s:.3f} → score={score_final:.3f}"
-            )
-
-            if score_final < puntuacion_minima:
-                log(f"    ↳ descartado (score {score_final:.3f} < umbral {puntuacion_minima})")
-                continue
-
-            if score_final > mejor_score:
-                mejor_score = score_final
-                mejor       = ResultadoCoincidencia(
-                    nombre_tema=nombre,
-                    inicio=inicio_fft,
-                    fin=fin_fft,
-                    puntuacion=score_final,
-                )
-
-        except Exception as e:
-            log(f"  - ⚠️ {nombre}: error en DTW ({e}), usando solo FFT como fallback")
-            if fft_s >= puntuacion_minima and fft_s > mejor_score:
-                mejor_score = fft_s
-                mejor       = ResultadoCoincidencia(
-                    nombre_tema=nombre,
-                    inicio=inicio_fft,
-                    fin=fin_fft,
-                    puntuacion=fft_s,
-                )
-
-    if mejor:
-        log(
-            f"  ✓ Mejor: {mejor.nombre_tema} "
-            f"{formatear_tiempo(mejor.inicio)} → {formatear_tiempo(mejor.fin)} "
-            f"(score={mejor.puntuacion:.3f})"
-        )
-
-    return mejor
-
 def formatear_tiempo(t: float) -> str:
     total_ms = int(round(t * 1000))
     h,  rem  = divmod(total_ms, 3_600_000)
@@ -862,64 +790,212 @@ def chapters_heuristicos(dur: float) -> List[Tuple[float, str]]:
     return [(0.0, "Prólogo"), (op_inicio, "Opening"), (ed_inicio, "Ending")]
 
 # ─────────────────────────────────────────────
-#  LIMPIEZA NOMBRE / INFERENCIAS
+#  PARSING DE NOMBRES DE ARCHIVO (aniparse / anitopy / regex)
 # ─────────────────────────────────────────────
 
-_BRACKET_BLOCK = re.compile(r"[\[\(\{][^\]\)\}]{1,90}[\]\)\}]")
+# Ruido residual para el fallback regex y para score_titulo
+_RE_RUIDO_TITULO = re.compile(
+    r"(?i)\b(2160p|1080p|720p|480p|4k|8k"
+    r"|10bit|10-bit|8bit|hi10p?"
+    r"|x264|x265|hevc|av1|h\.?26[45]"
+    r"|web[- ]?(?:dl|rip)|webrip|bdrip|blu[- ]?ray|bluray|dvd"
+    r"|hdr10\+?|hdr|dolby\s*vision|\bdv\b|atmos"
+    r"|aac\d*\.?\d*|flac|opus|eac3|ac3|ddp?\d*\.?\d*"
+    r"|jpn|eng|spa|lat|msubs?|multisub|multi|dual[- ]?audio"
+    r"|uncensored|censored|repack|proper|remux"
+    r"|amzn|\bcr\b|\bnf\b|dsnp|adn)\b"
+    r"|[\[\(\{][^\]\)\}]{0,90}[\]\)\}]"  # bloques entre brackets
+)
 
-_RUIDO = [
-    r"(?i)\b(2160p|1080p|720p|480p|4k|8k)\b",
-    r"(?i)\b(10bit|10-bit|8bit|hi10|hi10p)\b",
-    r"(?i)\b(x264|x265|hevc|av1|h\.?264|h\.?265)\b",
-    r"(?i)\b(web[- ]?dl|web[- ]?rip|webrip|bdrip|blu[- ]?ray|bluray|dvd)\b",
-    r"(?i)\b(hdr10\+?|hdr|dolby\s*vision|dv|atmos)\b",
-    r"(?i)\b(aac(?:\d+(?:\.\d+)?)?|flac|opus|eac3|ac3|ddp?(?:\d(?:\.\d)?)?)\b",
-    r"(?i)\b(jpn|eng|spa|lat|sub|subs|msubs|multisub|multi|dual[ -]?audio)\b",
-    r"(?i)\b(uncensored|censored|repack|proper|remux|v\d+)\b",
-    r"(?i)\b(amzn|cr|nf|dsnp|adn)\b",
-]
+def _score_titulo(title: str) -> int:
+    """
+    Evalúa qué tan limpio está un título candidato.
+    Puntuación más alta = mejor candidato para consultar Jikan.
+    Se usa para decidir qué resultado (aniparse vs anitopy) tiene el mejor título.
+    """
+    if not title:
+        return -999
+    score = 0
+    if 3 <= len(title) <= 80:
+        score += 2
+    # Penalizar ruido técnico típico de releases
+    if _RE_RUIDO_TITULO.search(title):
+        score -= 2
+    # Penalizar número suelto al final SOLO si no parece temporada explícita
+    # (e.g. "Kingdom 5" puede ser legítimo — se maneja luego en el merge)
+    if re.search(r"(?<!S)\s\d{1,2}$", title):
+        score -= 1   # penalización leve, no definitiva
+    # Penalizar hashes o números largos
+    if re.search(r"\b[0-9A-Fa-f]{6,}\b", title):
+        score -= 3
+    return score
 
-def recortar_a_nombre_serie(base: str) -> str:
-    for pat in [
-        r"(?i)\bS\d{1,2}E\d{1,3}(?:v\d+)?\b",
-        r"(?i)\b\d{1,2}x\d{1,3}\b",
-        r"(?i)\b(?:EP?|E)\d{1,3}(?:v\d+)?\b",
-    ]:
-        m = re.search(pat, base)
-        if m:
-            return base[: m.start()]
-    return base
 
-def _limpiar_nombre_release(base: str) -> str:
-    s = _BRACKET_BLOCK.sub(" ", base)
+def _safe_int(x) -> Optional[int]:
+    try:
+        return int(x) if x is not None else None
+    except (ValueError, TypeError):
+        return None
+
+
+def _parse_con_aniparse(stem: str) -> Optional[dict]:
+    if not _ANIPARSE_OK:
+        return None
+    try:
+        result = _aniparse.parse(stem)
+        return result if isinstance(result, dict) else None
+    except Exception:
+        return None
+
+
+def _parse_con_anitopy(stem: str) -> Optional[dict]:
+    if not _ANITOPY_OK:
+        return None
+    try:
+        result = _anitopy.parse(stem)
+        return result if isinstance(result, dict) else None
+    except Exception:
+        return None
+
+
+def _parsed_dict_a_campos(d: dict) -> tuple:
+    """Extrae (titulo, temporada, episodio) de un dict de aniparse/anitopy."""
+    titulo    = (d.get("anime_title") or "").strip()
+    temporada = _safe_int(d.get("anime_season"))
+    episodio  = _safe_int(d.get("episode_number"))
+    return titulo, temporada, episodio
+
+
+def _fallback_regex(stem: str) -> "ParsedAnime":
+    """
+    Parser de último recurso basado en regex.
+    Mantiene compatibilidad con nombres que las bibliotecas no manejen.
+    """
+    # Quitar bloques entre brackets (grupo, tags, hash)
+    s = re.sub(r"[\[\(\{][^\]\)\}]{0,90}[\]\)\}]", " ", stem)
+    # Quitar tag de release al final (e.g. "-SubsPlease")
     s = re.sub(r"-[A-Za-z0-9]+$", " ", s)
-    s = re.sub(r"(?i)\bS\d{1,2}E\d{1,3}(?:v\d+)?\b", " ", s)
-    s = re.sub(r"(?i)\b(?:EP?|E)\d{1,3}(?:v\d+)?\b", " ", s)
-    for pat in _RUIDO:
-        s = re.sub(pat, " ", s)
-    s = re.sub(r"[._]+", " ", s)
-    s = re.sub(r"\s+", " ", s).strip(" -_.")
-    return s
 
-def _extraer_temporada_textual(name: str) -> Optional[int]:
-    x = (name or "").casefold()
+    # Temporada textual
+    temporada: Optional[int] = None
     for pat, grp in [
-        (r"\b(\d+)\s*(st|nd|rd|th)\s*season\b", 1),
-        (r"\bseason[_\s\-]*(\d+)\b",             1),
+        (r"\b(\d+)\s*(?:st|nd|rd|th)\s*season\b", 1),
+        (r"\bseason[_\s\-]*(\d+)\b", 1),
         (r"(?:^|[\s._-])s(\d{1,2})(?:$|[\s._-])", 1),
     ]:
-        m = re.search(pat, x)
+        m = re.search(pat, s, re.I)
         if m:
-            try:
-                return int(m.group(grp))
-            except Exception:
-                pass
-    return None
+            temporada = _safe_int(m.group(grp))
+            break
+
+    # Episodio
+    episodio: Optional[int] = None
+    for pat, grps in [
+        (r"(?i)\bS(\d{1,2})E(\d{1,3})(?:v\d+)?\b", (1, 2)),
+        (r"(?i)\b(\d{1,2})x(\d{1,3})\b",             (1, 2)),
+    ]:
+        m = re.search(pat, s)
+        if m:
+            temporada = temporada or _safe_int(m.group(grps[0]))
+            episodio  = _safe_int(m.group(grps[1]))
+            break
+    if episodio is None:
+        m = re.search(r"(?i)\b(?:EP?|E)\s*(\d{1,3})(?:v\d+)?\b", s)
+        if m:
+            episodio = _safe_int(m.group(1))
+    if episodio is None:
+        m = re.search(r"-\s+(\d{1,3})(?:v\d+)?(?:\s|$|\[|\()", s)
+        if m:
+            ep = _safe_int(m.group(1))
+            if ep and 1 <= ep <= 399:
+                episodio = ep
+
+    # Limpiar título: quitar episodio, ruido técnico, separadores
+    titulo = s
+    titulo = re.sub(r"(?i)\bS\d{1,2}E\d{1,3}(?:v\d+)?\b", " ", titulo)
+    titulo = re.sub(r"(?i)\b(?:EP?|E)\d{1,3}(?:v\d+)?\b",   " ", titulo)
+    titulo = re.sub(r"-\s*\d{1,3}(?:v\d+)?(?:\s|$)",          " ", titulo)
+    titulo = _RE_RUIDO_TITULO.sub(" ", titulo)
+    titulo = re.sub(r"[._]+", " ", titulo)
+    titulo = re.sub(r"\s+", " ", titulo).strip(" -_.")
+
+    logger.debug(f"[parsing] fallback regex para {stem!r} → título={titulo!r}")
+    return ParsedAnime(titulo=titulo, temporada=temporada, episodio=episodio, fuente="fallback")
+
+
+def parsear_nombre_archivo(ruta_video: str) -> "ParsedAnime":
+    """
+    Punto de entrada único para parsear nombres de archivo de anime.
+
+    Estrategia:
+      1. aniparse  (principal — mejor con nombres modernos)
+      2. anitopy   (respaldo  — más probado en variedad)
+      3. merge     de ambos si los dos producen resultado
+      4. regex     fallback si las bibliotecas no están instaladas o fallan
+    """
+    stem = Path(ruta_video).stem
+
+    a = _parse_con_aniparse(stem)
+    b = _parse_con_anitopy(stem)
+
+    if a is None and b is None:
+        return _fallback_regex(stem)
+
+    titulo_a, temp_a, ep_a = _parsed_dict_a_campos(a) if a else ("", None, None)
+    titulo_b, temp_b, ep_b = _parsed_dict_a_campos(b) if b else ("", None, None)
+
+    # Merge consciente de temporada: si una biblioteca detectó season pero la otra
+    # dejó el número pegado al título (e.g. "Kingdom 5" cuando season=5), limpiarlo.
+    temp_combinada = temp_a if temp_a is not None else temp_b
+    if temp_combinada:
+        titulo_a = re.sub(rf"\s{temp_combinada}$", "", titulo_a).strip()
+        titulo_b = re.sub(rf"\s{temp_combinada}$", "", titulo_b).strip()
+
+    # Elegir el mejor título por score de limpieza
+    score_a = _score_titulo(titulo_a)
+    score_b = _score_titulo(titulo_b)
+
+    if score_b > score_a:
+        titulo_elegido = titulo_b
+        fuente         = "anitopy" if b and not a else "merge"
+    else:
+        titulo_elegido = titulo_a
+        fuente         = "aniparse" if a and not b else "merge"
+
+    # Si el título elegido sigue teniendo ruido (score < 1), caer a regex.
+    # Umbral 1 en lugar de 0 para capturar falsos positivos como "Frieren 1080p".
+    if _score_titulo(titulo_elegido) < 1:
+        logger.debug(f"[parsing] título descartado ({titulo_elegido!r}), fallback a regex")
+        return _fallback_regex(stem)
+
+    # Episodio: primer valor no-None gana (aniparse tiene prioridad)
+    temporada = temp_combinada
+    episodio  = ep_a if ep_a is not None else ep_b
+
+    resultado = ParsedAnime(
+        titulo=titulo_elegido,
+        temporada=temporada,
+        episodio=episodio,
+        fuente=fuente,
+    )
+    logger.debug(
+        f"[parsing] {Path(ruta_video).name!r} → "
+        f"aniparse={titulo_a!r} | anitopy={titulo_b!r} → "
+        f"final={resultado.titulo!r} "
+        f"(fuente={resultado.fuente}, T={resultado.temporada}, E={resultado.episodio})"
+    )
+    return resultado
+
+
+# Wrappers de compatibilidad — mantienen la firma anterior intacta
+# para no reescribir el ResolverWorker de golpe.
 
 def quitar_sufijo_episodio(s: str) -> str:
+    """Quita un sufijo ' - NN' de un título canónico (no de nombre de archivo)."""
     return re.sub(r"(?i)\s*-\s*\d{1,3}(?:v\d+)?\s*$", "", (s or "").strip())
 
 def quitar_marcador_temporada(s: str) -> str:
+    """Quita marcadores de temporada textual de un título canónico."""
     x = (s or "").strip()
     x = re.sub(r"(?i)\b(\d+)\s*(st|nd|rd|th)\s*season\b", "", x)
     x = re.sub(r"(?i)\bseason[_\s\-]*\d+\b", "", x)
@@ -927,9 +1003,7 @@ def quitar_marcador_temporada(s: str) -> str:
     return x
 
 def inferir_consulta_desde_nombre_archivo(ruta_video: str) -> str:
-    base = Path(ruta_video).stem
-    base = recortar_a_nombre_serie(base)
-    return _limpiar_nombre_release(base)
+    return parsear_nombre_archivo(ruta_video).titulo
 
 def _extraer_temporada_desde_slug_o_nombre(s: str) -> Optional[int]:
     if not s:
@@ -1117,58 +1191,8 @@ def _jikan_rank(q: str, resultados: List[dict]) -> List[dict]:
 def extraer_temporada_y_episodio_desde_nombre_archivo(
     ruta_video: str,
 ) -> Tuple[Optional[int], Optional[int]]:
-    name           = Path(ruta_video).name
-    temporada_text = _extraer_temporada_textual(name)
-
-    # 1. Patrón explícito SxxExx o xxXxx (máxima prioridad)
-    for pat, grps in [
-        (r"(?i)\bS(\d{1,2})E(\d{1,3})(?:v\d+)?\b", (1, 2)),
-        (r"(?i)\b(\d{1,2})x(\d{1,3})\b",            (1, 2)),
-    ]:
-        m = re.search(pat, name)
-        if m:
-            try:
-                return int(m.group(grps[0])), int(m.group(grps[1]))
-            except Exception:
-                pass
-
-    # 2. Patrón explícito Exx / EPxx
-    m = re.search(r"(?i)\b(?:EP?|E)\s*(\d{1,3})(?:v\d+)?\b", name)
-    if m:
-        try:
-            return temporada_text, int(m.group(1))
-        except Exception:
-            pass
-
-    # 3. Número al final precedido de " - " o " " (regla de oro: el episodio
-    #    casi siempre está al final del nombre, no en medio del título).
-    #    Se busca antes de limpiar el nombre para preservar la posición relativa.
-    stem = Path(ruta_video).stem
-    m = re.search(r"(?:^|[\s._-])-\s*(\d{1,3})(?:v\d+)?(?:\s*[\[\(]|$)", stem)
-    if not m:
-        # Guión espacio número al final, estilo "Serie Name - 06 [tag]"
-        m = re.search(r"-\s+(\d{1,3})(?:v\d+)?(?:\s|$|\[|\()", stem)
-    if m:
-        try:
-            ep = int(m.group(1))
-            if 1 <= ep <= 399:
-                return temporada_text, ep
-        except Exception:
-            pass
-
-    # 4. Último recurso: limpiar el nombre y tomar el último número visible
-    #    (no el primero, para evitar agarrar números del título como "Slave 2")
-    cleaned = _limpiar_nombre_release(stem)
-    numeros = re.findall(r"(?:^|[\s._-])(\d{1,3})(?:v\d+)?(?:$|[\s._-])", cleaned)
-    for ep_str in reversed(numeros):   # de derecha a izquierda
-        try:
-            ep = int(ep_str)
-            if 1 <= ep <= 399:
-                return temporada_text, ep
-        except Exception:
-            pass
-
-    return temporada_text, None
+    p = parsear_nombre_archivo(ruta_video)
+    return p.temporada, p.episodio
 
 def jikan_resolver_titulo(q: str) -> Tuple[str, Optional[dict], bool]:
     q = (q or "").strip()
@@ -1305,9 +1329,22 @@ class DialogoSelectorTabla(QDialog):
 #  WORKERS (QThread)
 # ─────────────────────────────────────────────
 
-class ResolverWorker(QThread):
-    log        = pyqtSignal(str)
-    progress   = pyqtSignal(int)
+class _BaseWorker(QThread):
+    """Base compartida para todos los workers — provee _log con nivel automático."""
+    log      = pyqtSignal(str)
+    progress = pyqtSignal(int)
+
+    def _log(self, s: str):
+        self.log.emit(s)
+        if s.startswith("  - ⚠️") or s.startswith("⚠️"):
+            logger.warning(s)
+        elif s.startswith("❌"):
+            logger.error(s)
+        else:
+            logger.info(s)
+
+
+class ResolverWorker(_BaseWorker):
     need_pick  = pyqtSignal(object)
     resolved   = pyqtSignal(object)
     failed     = pyqtSignal(str)
@@ -1354,15 +1391,6 @@ class ResolverWorker(QThread):
         self._mx.unlock()
         self.need_pick.emit(req)
         return self._wait_pick()
-
-    def _log(self, s: str):
-        self.log.emit(s)
-        if s.startswith("  - ⚠️") or s.startswith("⚠️"):
-            logger.warning(s)
-        elif s.startswith("❌"):
-            logger.error(s)
-        else:
-            logger.info(s)
 
     def run(self):
         try:
@@ -1585,9 +1613,7 @@ class ResolverWorker(QThread):
         raise RuntimeError("No encontré la serie en AnimeThemes vía Jikan.")
 
 
-class ChapterizerWorker(QThread):
-    log       = pyqtSignal(str)
-    progress  = pyqtSignal(int)
+class ChapterizerWorker(_BaseWorker):
     terminado = pyqtSignal(str)
     fallo     = pyqtSignal(str)
 
@@ -1595,15 +1621,6 @@ class ChapterizerWorker(QThread):
         super().__init__(ventana)
         self.ventana = ventana
         self.params  = params
-
-    def _log(self, s: str):
-        self.log.emit(s)
-        if s.startswith("  - ⚠️") or s.startswith("⚠️"):
-            logger.warning(s)
-        elif s.startswith("❌"):
-            logger.error(s)
-        else:
-            logger.info(s)
 
     def run(self):
         try:
@@ -1656,11 +1673,36 @@ class ChapterizerWorker(QThread):
 
             wav_dir = construir_cache_temas(slug, anime_json, self._log)
 
-            wavs_temas: List[Tuple[str, Path]] = [
-                (ruta.stem, ruta)
-                for ruta in sorted(wav_dir.glob("*.wav"))
-                if ruta.stem.upper().startswith(("OP", "ED"))
-            ]
+            # Precargar todos los WAVs de temas UNA sola vez — evita re-leer disco
+            # en cada ventana del sliding window (potencialmente 20+ lecturas por tema).
+            # También se resamplea aquí si es necesario (edge case) y se precalcula
+            # frames_t para no repetirlo en cada llamada a _buscar_con_ventana.
+            _SR_TARGET = _SR_FEATURES  # 16 000 Hz — mismo hz que el audio del episodio
+            self._log("• Precargando audio de temas…")
+            wavs_temas: List[TemaAudio] = []
+            for ruta in sorted(wav_dir.glob("*.wav")):
+                if not ruta.stem.upper().startswith(("OP", "ED")):
+                    continue
+                try:
+                    y_th, hz_th = leer_pcm16_mono_wav(str(ruta))
+                    if hz_th != _SR_TARGET:
+                        self._log(f"  - ⚠️ {ruta.stem}: resampleando {hz_th}Hz → {_SR_TARGET}Hz…")
+                        razon     = _SR_TARGET / hz_th
+                        nuevo_len = int(len(y_th) * razon)
+                        x_orig    = np.linspace(0, len(y_th) - 1, len(y_th))
+                        x_nuevo   = np.linspace(0, len(y_th) - 1, nuevo_len)
+                        y_th      = np.interp(x_nuevo, x_orig, y_th).astype(np.float32)
+                        hz_th     = _SR_TARGET
+                    feat_th = obtener_features_con_cache(y_th, hz_th)
+                    wavs_temas.append(TemaAudio(
+                        nombre=ruta.stem,
+                        audio=y_th,
+                        hz=hz_th,
+                        frames=int(len(y_th) / _HOP_LENGTH),
+                        features=feat_th,
+                    ))
+                except Exception as e:
+                    self._log(f"  - ⚠️ {ruta.stem}: no se pudo cargar ({e}), omitido")
 
             if not wavs_temas:
                 raise RuntimeError(
@@ -1791,15 +1833,12 @@ class ChapterizerWorker(QThread):
         except Exception as e:
             self.fallo.emit(str(e))
 
-
-# ─────────────────────────────────────────────
-#  GUI
     def _buscar_con_ventana(
         self,
         y_zona:      np.ndarray,         # PCM completo de la zona (samples)
         feat_zona:   np.ndarray,         # features globales (n_feat, T_zona)
         hz:          int,
-        wavs_temas:  List[Tuple[str, Path]],
+        wavs_temas:  List[TemaAudio],
         objetivo:    str,
         zona_offset: float,              # segundos absolutos del inicio de la zona
         zona_dur:    float,              # duración de la zona en segundos
@@ -1834,15 +1873,10 @@ class ChapterizerWorker(QThread):
         # restrictivo como el 30% anterior.
         min_frames_absoluto = int(8 * hz / _HOP_LENGTH)
         frames_tema_min = min_frames_absoluto
-        for nombre_t, ruta_t in wavs_temas:
-            if not nombre_t.upper().startswith(objetivo):
+        for tema in wavs_temas:
+            if not tema.nombre.upper().startswith(objetivo):
                 continue
-            try:
-                y_t, hz_t = leer_pcm16_mono_wav(str(ruta_t))
-                frames_t = int(len(y_t) * (hz / hz_t) / _HOP_LENGTH)
-                frames_tema_min = min(frames_tema_min, int(0.25 * frames_t))
-            except Exception:
-                pass
+            frames_tema_min = min(frames_tema_min, int(0.25 * tema.frames))
         min_frames_win = max(min_frames_absoluto, frames_tema_min)
 
         for paso, s_inicio_raw in enumerate(range(0, int(zona_dur_s * hz) - win_samples + 1, step_samples)):
@@ -1911,7 +1945,7 @@ class ChapterizerWorker(QThread):
         y_win:      np.ndarray,          # PCM de la ventana (para FFT)
         feat_win:   np.ndarray,          # features de la ventana (para DTW)
         hz:         int,
-        wavs_temas: List[Tuple[str, Path]],
+        wavs_temas: List[TemaAudio],
         objetivo:   str,
         params,
     ) -> Optional[ResultadoCoincidencia]:
@@ -1919,24 +1953,16 @@ class ChapterizerWorker(QThread):
         Pipeline FFT→DTW para una sola ventana.
         Separa la lógica de matching del slicing para mantener claridad
         de unidades: y_win son samples, feat_win son frames.
+        Los audios ya vienen precargados, resampleados y con frames_t calculado.
         """
-        candidatos_fft: List[Tuple[str, Path, np.ndarray, float, float, float]] = []
+        candidatos_fft: List[CandidatoFFT] = []
 
-        for nombre, ruta_wav in wavs_temas:
-            if not nombre.upper().startswith(objetivo):
+        for tema in wavs_temas:
+            if not tema.nombre.upper().startswith(objetivo):
                 continue
 
-            y_th, hz_tema = leer_pcm16_mono_wav(str(ruta_wav))
-
-            if hz_tema != hz:
-                razon     = hz / hz_tema
-                nuevo_len = int(len(y_th) * razon)
-                x_orig    = np.linspace(0, len(y_th) - 1, len(y_th))
-                x_nuevo   = np.linspace(0, len(y_th) - 1, nuevo_len)
-                y_th      = np.interp(x_nuevo, x_orig, y_th).astype(np.float32)
-
             res_fft = _fft_score(
-                y_win, y_th, hz,
+                y_win, tema.audio, hz,
                 submuestreo=params.submuestreo,
                 porcion_theme=params.porcion_theme,
             )
@@ -1944,12 +1970,17 @@ class ChapterizerWorker(QThread):
                 continue
 
             inicio_fft, fin_fft, fft_s = res_fft
-            candidatos_fft.append((nombre, ruta_wav, y_th, inicio_fft, fin_fft, fft_s))
+            candidatos_fft.append(CandidatoFFT(
+                tema=tema,
+                inicio=inicio_fft,
+                fin=fin_fft,
+                score_fft=fft_s,
+            ))
 
         if not candidatos_fft:
             return None
 
-        candidatos_fft.sort(key=lambda c: c[5], reverse=True)
+        candidatos_fft.sort(key=lambda c: c.score_fft, reverse=True)
         candidatos_top = candidatos_fft[:_TOP_K_FFT]
 
         # ── Early pruning con threshold spread-aware ─────────────────────
@@ -1959,12 +1990,12 @@ class ChapterizerWorker(QThread):
         #     threshold sube y filtra la ventana (todos malos por igual).
         #   - Si un candidato destaca → spread grande, threshold no lo bloquea.
         # Más robusto que percentil fijo ante audios con distintos niveles de señal.
-        fft_scores   = [c[5] for c in candidatos_top]
+        fft_scores   = [c.score_fft for c in candidatos_top]
         p25          = float(np.percentile(fft_scores, 25))
         p75          = float(np.percentile(fft_scores, 75))
         spread       = p75 - p25
         thr_dinamico = max(_FFT_PRUNING_MIN, p25 + 0.5 * spread)
-        mejor_fft_s  = candidatos_top[0][5]
+        mejor_fft_s  = candidatos_top[0].score_fft
 
         logger.debug(
             f"FFT max={mejor_fft_s:.3f} p25={p25:.3f} p75={p75:.3f} "
@@ -1976,23 +2007,22 @@ class ChapterizerWorker(QThread):
 
         self._log(
             f"  → Top-{len(candidatos_top)} candidatos FFT: "
-            + ", ".join(f"{c[0]}({c[5]:.3f})" for c in candidatos_top)
+            + ", ".join(f"{c.tema.nombre}({c.score_fft:.3f})" for c in candidatos_top)
         )
 
         # DTW usa el slice de features ya calculado — sin re-extraer
         mejor: Optional[ResultadoCoincidencia] = None
         mejor_score = -1.0
 
-        for nombre, ruta_wav, y_th, inicio_fft, fin_fft, fft_s in candidatos_top:
+        for cand in candidatos_top:
             try:
-                feat_th   = obtener_features_con_cache(y_th, hz)
-                dtw_costo = _dtw_score(feat_win, feat_th)
-                dtw_s     = max(0.0, 1.0 - dtw_costo / 50.0)
-                score_final = _W_DTW * dtw_s + _W_FFT * fft_s
+                dtw_costo   = _dtw_score(feat_win, cand.tema.features)
+                dtw_s       = max(0.0, 1.0 - dtw_costo / 50.0)
+                score_final = _W_DTW * dtw_s + _W_FFT * cand.score_fft
 
                 self._log(
-                    f"  - {nombre}: DTW={dtw_costo:.2f} dtw_s={dtw_s:.3f} "
-                    f"fft_s={fft_s:.3f} → score={score_final:.3f}"
+                    f"  - {cand.tema.nombre}: DTW={dtw_costo:.2f} dtw_s={dtw_s:.3f} "
+                    f"fft_s={cand.score_fft:.3f} → score={score_final:.3f}"
                 )
 
                 if score_final < params.puntuacion_minima:
@@ -2002,21 +2032,21 @@ class ChapterizerWorker(QThread):
                 if score_final > mejor_score:
                     mejor_score = score_final
                     mejor       = ResultadoCoincidencia(
-                        nombre_tema=nombre,
-                        inicio=inicio_fft,
-                        fin=fin_fft,
+                        nombre_tema=cand.tema.nombre,
+                        inicio=cand.inicio,
+                        fin=cand.fin,
                         puntuacion=score_final,
                     )
 
             except Exception as e:
-                self._log(f"  - ⚠️ {nombre}: error en DTW ({e}), usando FFT como respaldo")
-                if fft_s >= params.puntuacion_minima and fft_s > mejor_score:
-                    mejor_score = fft_s
+                self._log(f"  - ⚠️ {cand.tema.nombre}: error en DTW ({e}), usando FFT como respaldo")
+                if cand.score_fft >= params.puntuacion_minima and cand.score_fft > mejor_score:
+                    mejor_score = cand.score_fft
                     mejor       = ResultadoCoincidencia(
-                        nombre_tema=nombre,
-                        inicio=inicio_fft,
-                        fin=fin_fft,
-                        puntuacion=fft_s,
+                        nombre_tema=cand.tema.nombre,
+                        inicio=cand.inicio,
+                        fin=cand.fin,
+                        puntuacion=cand.score_fft,
                     )
 
         if mejor:

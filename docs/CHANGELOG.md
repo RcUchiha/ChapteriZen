@@ -1,3 +1,27 @@
+## [0.0.7] — 12-07-2026
+
+### Nuevas funcionalidades
+
+- **Verificación cruzada de título entre Jikan y trace.moe/AniList**. Cuando Jikan devuelve un resultado ambiguo (varios animes con nombre similar), se dispara una identificación por trace.moe (o se reutiliza el `anilist_id` ya detectado) y se compara el título contra AniList. Si coinciden, el título queda confirmado; si discrepan, se abre un picker manual (`_verificar_y_resolver_discrepancia`) para que el usuario elija.
+- **Nueva función `jikan_navegar_por_episodio`**. Cuando el nombre del archivo no trae temporada explícita pero el número de episodio supera el conteo de episodios de la primera temporada, navega automáticamente la cadena de secuelas de Jikan hasta ubicar la temporada y el episodio relativo correctos.
+- **Filtrado de temas por episodio en `construir_cache_temas`**. Ahora solo descarga los temas de AnimeThemes cuyas `animethemeentries` cubren el episodio solicitado (según los rangos declarados), en vez de descargar siempre todos los temas de la serie.
+- **Fallback de cobertura OP↔ED**. Si AnimeThemes no tiene un tema catalogado para un rol (OP o ED) en el episodio actual, se busca el rol opuesto en esa misma zona antes de dar el episodio como sin coincidencia.
+- **UI con íconos**. Los botones de selección de video y carpeta de salida ahora usan íconos de `qtawesome` con efecto hover (`_HoverIcon`) en vez de texto plano.
+
+### Refactors
+
+- **Identificación por trace.moe reescrita**. Se elimina la subida intermedia a Litterbox: `trace_buscar_por_bytes` ahora sube la imagen directo por POST multipart a trace.moe, quitando un round-trip completo.
+- **`extraer_fotogramas_centrado` reemplaza a `extraer_fotogramas`**. En vez de fotogramas secuenciales desde el inicio del video, extrae N fotogramas distribuidos uniformemente y los ordena de más central a más extremo, maximizando la efectividad de la salida temprana en trace.moe.
+- **`identificar_anime_con_fotogramas` con consenso por lotes**. Los fotogramas se envían en lotes crecientes (`[centro]`, `[±1]`, `[±2]`...) y se vota por mayoría (por `anilist_id`) en dos fases: primero consenso de serie (similitud ≥ 95%), luego consenso de episodio, antes de aceptar el resultado. Antes se quedaba con el frame de mayor similitud individual, lo que daba falsos positivos con un único frame coincidente.
+- **Nuevo sistema de detección de ruido en nombres de archivo en tres capas**: set exacto de tokens (`_RUIDO_TOKENS`), regex con `\b` para tags normales y regex anclada al inicio del token (`_RE_RUIDO_TOKEN_INICIO`) para tags compuestos/pegados como `HEVC10bit`. `_titulo_es_usable` reemplaza a `_score_titulo` como filtro de calidad — este último ahora solo compara resultados entre aniparse y anitopy. Ya no penaliza títulos cortos válidos como "86".
+
+### Otros
+
+- Bump de versión 0.0.6 → 0.0.7.
+- Nuevo `requirements.txt` con las dependencias del proyecto (no existía archivo de dependencias previamente).
+
+---
+
 ## [0.0.6] — 03-04-2026
 
 ### Rendimiento

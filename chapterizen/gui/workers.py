@@ -26,7 +26,9 @@ from ..ffmpeg_utils import (
     extraer_audio_wav_mono_16k,
     leer_pcm16_mono_wav,
 )
-from ..trace_moe import _TRACE_UMBRAL_RAPIDO, identificar_anime_con_fotogramas, anilist_titulo_por_id
+from ..config import _es_error_transitorio
+from ..trace_moe import _TRACE_UMBRAL_RAPIDO, identificar_anime_con_fotogramas
+from ..anilist import anilist_buscar_titulo, anilist_titulo_por_id
 from ..animethemes import (
     buscar_anime_en_animethemes,
     obtener_anime_de_animethemes,
@@ -223,7 +225,13 @@ class ResolverWorker(_BaseWorker):
                     )
                 else:
                     self._log("• Jikan (base)…")
-                    titulo_resuelto, picked_base, titulo_confiable, ts1_base = jikan_resolver_titulo(consulta_jikan)
+                    try:
+                        titulo_resuelto, picked_base, titulo_confiable, ts1_base = jikan_resolver_titulo(consulta_jikan)
+                    except Exception as e:
+                        if not _es_error_transitorio(e):
+                            raise
+                        self._log("  - ⚠️ Jikan no disponible, usando AniList como respaldo…")
+                        titulo_resuelto, picked_base, titulo_confiable, ts1_base = anilist_buscar_titulo(consulta_jikan)
                     log_clv(logger.debug, "jikan_query", q=consulta_jikan, from_base=consulta_base,
                             origen="trace_moe" if _via_trace_moe else "filename")
                     log_clv(

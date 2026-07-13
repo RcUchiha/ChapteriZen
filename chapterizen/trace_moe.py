@@ -7,9 +7,10 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from loguru import logger
 
-from .config import _http, _reintento_http, _API_CACHE, _TTL_API_DAYS, TRACE_ENDPOINT, ANILIST_GRAPHQL
+from .config import _http, _reintento_http, TRACE_ENDPOINT
 from .modelos import AnimeDetectado
 from .parsing import parsear_nombre_archivo
+from .anilist import anilist_titulo_por_id
 
 
 @_reintento_http
@@ -112,35 +113,6 @@ def _consenso_episodio(
         f"usando número del nombre de archivo"
     )
     return None
-
-
-@_reintento_http
-def anilist_titulo_por_id(anilist_id: int) -> Optional[str]:
-    """Obtiene el título romaji de un anime por su ID exacto de AniList."""
-    clave  = f"anilist_id:{anilist_id}"
-    cached = _API_CACHE.get(clave)
-    if cached is not None:
-        return cached
-    query = """
-    query ($id: Int) {
-      Media(id: $id, type: ANIME) {
-        title { romaji }
-      }
-    }
-    """
-    r = _http.post(
-        ANILIST_GRAPHQL,
-        json={"query": query, "variables": {"id": anilist_id}},
-    )
-    r.raise_for_status()
-    titulo = (
-        ((r.json().get("data") or {}).get("Media") or {})
-        .get("title", {})
-        .get("romaji")
-    )
-    if titulo:
-        _API_CACHE.set(clave, titulo, expire=_TTL_API_DAYS * 86400)
-    return titulo or None
 
 
 def identificar_anime_con_fotogramas(

@@ -5,7 +5,6 @@ from pathlib import Path
 from typing import Optional, Tuple, List, Dict
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
-import httpx
 from loguru import logger
 
 from .config import _http, _reintento_http, _API_CACHE, _TTL_API_DAYS, TRACE_ENDPOINT, ANILIST_GRAPHQL

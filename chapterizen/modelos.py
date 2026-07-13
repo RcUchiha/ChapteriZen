@@ -2,8 +2,10 @@
 pipeline. Movido sin cambios desde chapterizen.py (monolito original,
 v0.0.7)."""
 from dataclasses import dataclass
-from typing import Optional, Tuple, List, Dict
+from typing import Optional, Tuple, List
 from pydantic import BaseModel, Field
+
+import numpy as np
 
 
 @dataclass

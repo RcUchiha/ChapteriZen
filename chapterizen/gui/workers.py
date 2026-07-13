@@ -52,6 +52,7 @@ from ..audio_matching import (
 )
 from ..chapters_xml import guardar_chapters, chapters_heuristicos
 from ..parsing import (
+    inferir_consulta_desde_nombre_archivo,
     quitar_sufijo_episodio,
     quitar_marcador_temporada,
     _titulo_es_usable,
@@ -71,7 +72,6 @@ from ..jikan import (
     filtrar_por_token_obligatorio,
 )
 from ..naming import construir_ruta_salida
-from .pickers import DialogoSelectorTabla
 
 
 class _BaseWorker(QThread):

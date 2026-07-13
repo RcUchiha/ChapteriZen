@@ -1,7 +1,6 @@
 """Punto de entrada de la aplicacion: estilo Qt, ventana principal y
 arranque. Movido sin cambios desde chapterizen.py (monolito original,
 v0.0.7)."""
-import sys
 from pathlib import Path
 from typing import Optional
 

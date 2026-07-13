@@ -2,7 +2,7 @@
 navegacion de la cadena de secuelas y verificacion cruzada de titulos.
 Movido sin cambios desde chapterizen.py (monolito original, v0.0.7)."""
 import re
-from typing import Optional, Tuple, List, Dict
+from typing import Optional, Tuple, List
 
 from loguru import logger
 from rapidfuzz import fuzz as _fuzz

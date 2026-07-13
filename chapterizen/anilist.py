@@ -1,11 +1,11 @@
-"""Integracion con AniList: busqueda de anime por texto, pensada como
-fuente alternativa cuando Jikan falla o resulta ambiguo (no conectada al
-flujo real todavia -- ver ResolverWorker en gui/workers.py).
+"""Integracion con AniList: busqueda de anime por texto (fallback cuando
+Jikan agota reintentos, ver ResolverWorker en gui/workers.py) y lookup de
+titulo por ID (usado por trace_moe.py para resolver el titulo de un
+anilist_id detectado por consenso de fotogramas).
 
-anilist_titulo_por_id (lookup por ID de AniList, usado por trace.moe)
-sigue viviendo en trace_moe.py -- gui/workers.py ya importa esa funcion
-desde ahi y no se toca en esta fase. Este modulo es solo para busqueda
-por texto.
+anilist_titulo_por_id vivia en trace_moe.py; se movio aqui para
+consolidar toda la logica de AniList en un solo modulo. trace_moe.py la
+importa de vuelta desde aqui.
 """
 import re
 from typing import Optional, Tuple, List
@@ -167,3 +167,32 @@ def anilist_buscar_titulo(consulta: str) -> Tuple[str, Optional[dict], bool, flo
     )
 
     return _titulo_principal(mejor, consulta), mejor, confiable, ts1
+
+
+@_reintento_http
+def anilist_titulo_por_id(anilist_id: int) -> Optional[str]:
+    """Obtiene el título romaji de un anime por su ID exacto de AniList."""
+    clave  = f"anilist_id:{anilist_id}"
+    cached = _API_CACHE.get(clave)
+    if cached is not None:
+        return cached
+    query = """
+    query ($id: Int) {
+      Media(id: $id, type: ANIME) {
+        title { romaji }
+      }
+    }
+    """
+    r = _http.post(
+        ANILIST_GRAPHQL,
+        json={"query": query, "variables": {"id": anilist_id}},
+    )
+    r.raise_for_status()
+    titulo = (
+        ((r.json().get("data") or {}).get("Media") or {})
+        .get("title", {})
+        .get("romaji")
+    )
+    if titulo:
+        _API_CACHE.set(clave, titulo, expire=_TTL_API_DAYS * 86400)
+    return titulo or None

@@ -7,15 +7,16 @@ from diskcache import Cache
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from chapterizen import config as cz_config
-from chapterizen import trace_moe as cz_trace_moe
 from chapterizen import animethemes as cz_animethemes
 from chapterizen import jikan as cz_jikan
 from chapterizen import anilist as cz_anilist
 
 # Modulos que hicieron "from .config import _API_CACHE" -- cada uno tiene su
-# propia referencia local al objeto Cache, asi que hay que parchear las 5
+# propia referencia local al objeto Cache, asi que hay que parchear las 4
 # (no solo config._API_CACHE) para que todos vean la misma cache de prueba.
-_MODULOS_CON_API_CACHE = (cz_config, cz_trace_moe, cz_animethemes, cz_jikan, cz_anilist)
+# trace_moe.py ya NO importa _API_CACHE directamente (anilist_titulo_por_id
+# se movio a anilist.py), asi que no aparece en esta lista.
+_MODULOS_CON_API_CACHE = (cz_config, cz_animethemes, cz_jikan, cz_anilist)
 
 
 @pytest.fixture(autouse=True)

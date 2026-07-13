@@ -2,7 +2,7 @@
 Tests para _consenso_trace() y _consenso_episodio() -- funciones puras,
 sin red, que implementan el voto por mayoria del pipeline de trace.moe.
 """
-import chapterizen as cz
+from chapterizen import trace_moe as cz
 
 
 class TestConsensoTrace:

@@ -4,7 +4,7 @@ chapters de salida.
 """
 from pathlib import Path
 
-import chapterizen as cz
+from chapterizen import naming as cz
 
 
 class TestConstruirRutaSalida:

@@ -2,7 +2,8 @@
 Tests para formatear_tiempo(), _tiempo_sin_ms() y tiempo_mkv() -- funciones
 puras de formateo de tiempo usadas en logs y en el XML de chapters.
 """
-import chapterizen as cz
+from chapterizen import audio_matching as cz
+from chapterizen import chapters_xml
 
 
 class TestFormatearTiempo:
@@ -29,10 +30,10 @@ class TestTiempoSinMs:
 
 class TestTiempoMkv:
     def test_cero(self):
-        assert cz.tiempo_mkv(0) == "00:00:00.000000000"
+        assert chapters_xml.tiempo_mkv(0) == "00:00:00.000000000"
 
     def test_con_segundos_y_medio(self):
-        assert cz.tiempo_mkv(1.5) == "00:00:01.500000000"
+        assert chapters_xml.tiempo_mkv(1.5) == "00:00:01.500000000"
 
     def test_con_horas_exactas(self):
-        assert cz.tiempo_mkv(3661.0) == "01:01:01.000000000"
+        assert chapters_xml.tiempo_mkv(3661.0) == "01:01:01.000000000"

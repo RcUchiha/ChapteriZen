@@ -5,7 +5,7 @@ HTTP ameritan reintento segun _reintento_http (tenacity).
 import httpx
 import pytest
 
-import chapterizen as cz
+from chapterizen import config as cz
 
 
 def _http_status_error(status_code: int) -> httpx.HTTPStatusError:

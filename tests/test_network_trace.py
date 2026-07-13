@@ -13,7 +13,7 @@ import httpx
 import pytest
 import respx
 
-import chapterizen as cz
+from chapterizen import trace_moe as cz
 
 TRACE_ENDPOINT = "https://api.trace.moe/search"
 ANILIST_GRAPHQL = "https://graphql.anilist.co"

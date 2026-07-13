@@ -6,7 +6,7 @@ import httpx
 import pytest
 import respx
 
-import chapterizen as cz
+from chapterizen import jikan as cz
 
 
 @respx.mock

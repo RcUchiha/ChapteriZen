@@ -3,7 +3,7 @@ Tests para _comparar_titulos_para_verificacion() y
 _aceptar_canon_sin_perder_tokens() -- comparacion de titulos entre
 Jikan/AniList y aceptacion de canon.
 """
-import chapterizen as cz
+from chapterizen import jikan as cz
 
 
 class TestCompararTitulosParaVerificacion:

@@ -6,7 +6,7 @@ respuesta exitosa, en vez de fallar en el primer intento.
 import httpx
 import respx
 
-import chapterizen as cz
+from chapterizen import jikan as cz
 
 JIKAN_ANIME = "https://api.jikan.moe/v4/anime"
 

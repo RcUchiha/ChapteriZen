@@ -5,7 +5,7 @@ Estos tests fijan el comportamiento ACTUAL (incluyendo casos donde el
 resultado es sorprendente, como que _titulo_es_usable("2451") -> True)
 para poder comparar contra el comportamiento tras la reestructuracion.
 """
-import chapterizen as cz
+from chapterizen import parsing as cz
 
 
 class TestParsearNombreArchivo:

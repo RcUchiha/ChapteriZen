@@ -28,7 +28,14 @@ from ..ffmpeg_utils import (
 )
 from ..config import _es_error_transitorio
 from ..trace_moe import _TRACE_UMBRAL_RAPIDO, identificar_anime_con_fotogramas
-from ..anilist import anilist_buscar_titulo, anilist_titulo_por_id, anilist_titulos_desde_item
+from ..anilist import (
+    anilist_buscar_titulo,
+    anilist_titulo_por_id,
+    anilist_titulos_desde_item,
+    anilist_resolver_temporada_por_sequel,
+    anilist_navegar_por_episodio,
+    _titulo_principal,
+)
 from ..animethemes import (
     buscar_anime_en_animethemes,
     obtener_anime_de_animethemes,
@@ -331,16 +338,27 @@ class ResolverWorker(_BaseWorker):
                             )
 
                     # Resolución de temporada — dos caminos mutuamente excluyentes.
+                    # picked_base puede venir de Jikan (shape con 'mal_id') o de
+                    # AniList (fallback cuando Jikan agota reintentos, shape con
+                    # 'id'/'idMal' y sin 'mal_id') -- cada shape usa su propio par
+                    # resolver/extractor de título (jikan_resolver_temporada_por_sequel
+                    # + título plano vs anilist_resolver_temporada_por_sequel +
+                    # _titulo_principal), pero los logs de usuario son idénticos sin
+                    # importar la fuente: la decisión de aceptar/rechazar el canon
+                    # (_aceptar_canon_sin_perder_tokens) vive aquí, no en jikan.py ni
+                    # en anilist.py, precisamente para que el mensaje sea el mismo.
                     if temporada >= 2 and picked_base and not temporada_fue_default:
                         # Camino A: filename declaró temporada explícita → navegar
                         # la cadena de secuelas hasta llegar a ese número de temporada.
                         try:
-                            self._log("• Jikan (resolviendo temporada secuela)…")
-                            picked_season = jikan_resolver_temporada_por_sequel(picked_base, temporada)
-                            canon_season  = (
-                                (picked_season.get("title") or "").strip()
-                                or titulo_resuelto or consulta_base
-                            )
+                            self._log("• Resolviendo temporada de secuela…")
+                            if "mal_id" in picked_base:
+                                picked_season = jikan_resolver_temporada_por_sequel(picked_base, temporada)
+                                canon_season  = (picked_season.get("title") or "").strip()
+                            else:
+                                picked_season = anilist_resolver_temporada_por_sequel(picked_base, temporada)
+                                canon_season  = _titulo_principal(picked_season, "")
+                            canon_season = canon_season or titulo_resuelto or consulta_base
                             if canon_season and _aceptar_canon_sin_perder_tokens(consulta_base, canon_season):
                                 consulta_base = canon_season
                             else:
@@ -365,10 +383,16 @@ class ResolverWorker(_BaseWorker):
                                     f"  - ℹ️ Ep. {episodio} supera los {eps_temporada} episodios de la primera temporada"
                                     " — detectando temporada automáticamente…"
                                 )
-                                picked_base, episodio, temporada = jikan_navegar_por_episodio(
-                                    picked_base, episodio
-                                )
-                                titulo_resuelto = (picked_base.get("title") or "").strip() or titulo_resuelto
+                                if "mal_id" in picked_base:
+                                    picked_base, episodio, temporada = jikan_navegar_por_episodio(
+                                        picked_base, episodio
+                                    )
+                                    titulo_resuelto = (picked_base.get("title") or "").strip() or titulo_resuelto
+                                else:
+                                    picked_base, episodio, temporada = anilist_navegar_por_episodio(
+                                        picked_base, episodio
+                                    )
+                                    titulo_resuelto = _titulo_principal(picked_base, "") or titulo_resuelto
                                 self._log(
                                     f"  - Reasignado a temporada {temporada}, episodio {episodio} — {titulo_resuelto!r}"
                                 )

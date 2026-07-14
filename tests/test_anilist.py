@@ -210,12 +210,14 @@ def test_anilist_resolver_temporada_por_sequel_cadena_cortada_lanza_runtime_erro
 
 
 @respx.mock
-def test_anilist_resolver_temporada_por_sequel_rechaza_salto_que_pierde_tokens():
-    """El SEQUEL existe y se navega correctamente, pero su titulo no
-    comparte tokens significativos con el titulo base -- _aceptar_canon_
-    sin_perder_tokens debe rechazar el salto (mismo gate que ya usa Jikan
-    en el caller de gui/workers.py) y la funcion debe devolver
-    elemento_base sin cambios."""
+def test_anilist_resolver_temporada_por_sequel_no_valida_el_titulo_resultante():
+    """anilist_resolver_temporada_por_sequel es puramente mecanica, igual
+    que jikan_resolver_temporada_por_sequel -- no aplica
+    _aceptar_canon_sin_perder_tokens internamente. Esa decision es
+    responsabilidad del caller (gui/workers.py), en el mismo punto donde
+    ya se aplica para Jikan, para que el mensaje de rechazo sea el mismo
+    sin importar la fuente (ver test_resolver_worker_integration.py para
+    la cobertura de ese gate a nivel de ResolverWorker)."""
     _mock_relations({
         100: [_edge("SEQUEL", _media(999, "Completely Different Show", episodes=12))],
     })
@@ -223,8 +225,8 @@ def test_anilist_resolver_temporada_por_sequel_rechaza_salto_que_pierde_tokens()
 
     resultado = cz.anilist_resolver_temporada_por_sequel(base, 2)
 
-    assert resultado is base
-    assert resultado["id"] == 100
+    assert resultado["id"] == 999
+    assert resultado["title"]["romaji"] == "Completely Different Show"
 
 
 @respx.mock

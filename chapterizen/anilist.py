@@ -14,7 +14,6 @@ from loguru import logger
 from rapidfuzz import fuzz as _fuzz
 
 from .config import _http, _reintento_http, _API_CACHE, _TTL_API_DAYS, ANILIST_GRAPHQL
-from .jikan import _aceptar_canon_sin_perder_tokens
 
 
 _ANILIST_SEARCH_QUERY = """
@@ -252,26 +251,17 @@ def anilist_resolver_temporada_por_sequel(elemento_base: dict, temporada: int) -
     """Analogo a jikan_resolver_temporada_por_sequel (jikan.py): navega
     la cadena de secuelas de AniList hasta el numero de temporada pedido.
 
-    A diferencia de la version Jikan, aplica _aceptar_canon_sin_perder_tokens
-    como red de seguridad al final: si el titulo del eslabon alcanzado
-    pierde tokens significativos del titulo base, se descarta el salto
-    completo y se devuelve elemento_base sin cambios (equivalente a no
-    haber navegado)."""
+    Puramente mecanica, igual que su par de Jikan -- no valida el titulo
+    resultante. La decision de aceptar o rechazar el canon (via
+    _aceptar_canon_sin_perder_tokens) es responsabilidad del caller
+    (gui/workers.py), en el mismo punto donde ya se aplica para Jikan,
+    para que el mensaje de rechazo sea identico sin importar la fuente."""
     if not elemento_base or not temporada or temporada <= 1:
         return elemento_base
 
-    titulo_base = _titulo_principal(elemento_base, "")
-    actual      = elemento_base
+    actual = elemento_base
     for paso in range(temporada - 1):
         actual = anilist_avanzar_a_secuela(actual, contexto=f"paso {paso + 1}/{temporada - 1}")
-
-    titulo_actual = _titulo_principal(actual, "")
-    if titulo_actual and not _aceptar_canon_sin_perder_tokens(titulo_base, titulo_actual):
-        logger.warning(
-            f"AniList: ignorando salto de temporada por recorte de título: "
-            f"{titulo_base!r} → {titulo_actual!r}"
-        )
-        return elemento_base
     return actual
 
 
@@ -288,13 +278,12 @@ def anilist_navegar_por_episodio(
 
     Devuelve (entry_anilist, episodio_relativo, numero_temporada).
     Lanza RuntimeError si la cadena esta incompleta o falta el conteo de
-    episodios en algun eslabon.
+    episodios en algun eslabon (ambos son datos reales de AniList).
 
-    Misma red de seguridad que anilist_resolver_temporada_por_sequel: si
-    el eslabon final pierde tokens significativos del titulo base, se
-    descarta la navegacion completa y se devuelve (base_entry,
-    episodio_abs, 1) sin cambios."""
-    titulo_base = _titulo_principal(base_entry, "")
+    Puramente mecanica, igual que jikan_navegar_por_episodio -- no valida
+    el titulo resultante (Jikan tampoco lo hace en este punto hoy; la
+    unica proteccion existente en ese camino es _aplicar_canon, generica
+    y aplicada por el caller al final del flujo)."""
     actual      = base_entry
     temp_num    = 1
     ep_restante = episodio_abs
@@ -313,13 +302,6 @@ def anilist_navegar_por_episodio(
             )
 
         if ep_restante <= eps:
-            titulo_actual = _titulo_principal(actual, "")
-            if actual is not base_entry and titulo_actual and not _aceptar_canon_sin_perder_tokens(titulo_base, titulo_actual):
-                logger.warning(
-                    f"AniList: ignorando navegación por episodio por recorte de título: "
-                    f"{titulo_base!r} → {titulo_actual!r}"
-                )
-                return base_entry, episodio_abs, 1
             return actual, ep_restante, temp_num
 
         ep_restante -= eps

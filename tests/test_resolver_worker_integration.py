@@ -40,6 +40,8 @@ _pedir_pick en gui/workers.py):
   Aca se prefiere conectar need_pick porque es mas fiel a como lo hace
   __main__.py con el dialogo real.
 """
+import json
+
 import httpx
 import respx
 
@@ -251,3 +253,95 @@ def test_jikan_y_anilist_agotan_reintentos_propaga_failed(tmp_path):
     assert resultado.get("error")
     assert "503" in resultado["error"]
     assert any("Jikan no disponible, usando AniList como respaldo" in l for l in logs)
+
+
+def _mock_anilist_search_y_relations(media_busqueda: list, relaciones_por_id: dict):
+    """Un solo mock de POST a ANILIST_GRAPHQL que enruta segun el shape de
+    las variables del body: {'search': ...} -> query de busqueda
+    (anilist_buscar_titulo), {'id': ...} -> query de relations
+    (anilist_avanzar_a_secuela). Necesario porque ambas queries pegan al
+    mismo endpoint y en estos tests se ejercitan las dos en la misma
+    corrida de run()."""
+    def _side_effect(request: httpx.Request) -> httpx.Response:
+        body      = json.loads(request.content)
+        variables = body.get("variables") or {}
+        if "search" in variables:
+            return httpx.Response(200, json={"data": {"Page": {"media": media_busqueda}}})
+        if "id" in variables:
+            edges = relaciones_por_id.get(variables["id"], [])
+            return httpx.Response(200, json={"data": {"Media": {"relations": {"edges": edges}}}})
+        return httpx.Response(200, json={"data": {}})
+    respx.post(ANILIST_GRAPHQL).mock(side_effect=_side_effect)
+
+
+def _anilist_media(anilist_id, romaji, episodes=12):
+    return {
+        "id": anilist_id,
+        "idMal": anilist_id + 900000,
+        "title": {"romaji": romaji, "english": None, "native": None, "userPreferred": romaji},
+        "synonyms": [],
+        "format": "TV", "status": "FINISHED", "episodes": episodes,
+        "startDate": {"year": 2024, "month": 1, "day": 1},
+    }
+
+
+@respx.mock
+def test_jikan_caido_anilist_navega_secuela_automaticamente_sin_picker(tmp_path):
+    """Caso Chained Soldier: Jikan agota reintentos, AniList resuelve el
+    titulo base (unico resultado, confiable) y el filename declara
+    temporada explicita (S02) -> Camino A navega la cadena de secuelas de
+    AniList (anilist_resolver_temporada_por_sequel, conectado en esta
+    fase) y adopta el canon de temporada 2 automaticamente. AnimeThemes
+    encuentra match exacto para el titulo de temporada 2 -> no hace falta
+    picker en ningun punto del flujo."""
+    respx.get(JIKAN_ANIME).mock(return_value=httpx.Response(503, json={"error": "down"}))
+    _mock_anilist_search_y_relations(
+        media_busqueda=[_anilist_media(100, "Chained Soldier", episodes=12)],
+        relaciones_por_id={
+            100: [{"relationType": "SEQUEL", "node": _anilist_media(200, "Chained Soldier Season 2", episodes=12)}],
+        },
+    )
+    respx.get(ANIMETHEMES_SEARCH).mock(return_value=httpx.Response(200, json={"search": {"anime": [
+        {"name": "Chained Soldier Season 2", "year": 2025, "season": None, "slug": "chained-soldier-season-2"},
+    ]}}))
+
+    worker, logs, resultado = _worker(tmp_path, "Chained Soldier S02E03.mkv", usar_exacto=True)
+    worker.run()
+
+    assert resultado.get("ok") is True
+    assert resultado["params"].slug == "chained-soldier-season-2"
+    assert resultado["params"].titulo_usado == "Chained Soldier Season 2"
+    assert resultado["params"].episodio == 3
+
+    assert any("Jikan no disponible, usando AniList como respaldo" in l for l in logs)
+    assert "• Resolviendo temporada de secuela…" in logs
+    assert not any("🖱️" in l for l in logs)
+    assert not any(l.startswith("  - ⚠️ Ignorando canon de temporada por recorte") for l in logs)
+
+
+@respx.mock
+def test_canon_de_secuela_anilist_rechazado_por_recorte_log_identico_a_jikan(tmp_path):
+    """El SEQUEL de AniList existe y se navega correctamente, pero su
+    titulo no comparte tokens significativos con el titulo base -- el
+    gate vive en gui/workers.py (no en anilist.py, ver fix de esta misma
+    fase), asi que el mensaje debe ser TEXTUALMENTE igual al que ya
+    produce el camino de Jikan para el mismo caso."""
+    respx.get(JIKAN_ANIME).mock(return_value=httpx.Response(503, json={"error": "down"}))
+    _mock_anilist_search_y_relations(
+        media_busqueda=[_anilist_media(100, "Attack on Titan", episodes=25)],
+        relaciones_por_id={
+            100: [{"relationType": "SEQUEL", "node": _anilist_media(999, "Completely Different Show", episodes=12)}],
+        },
+    )
+
+    worker, logs, resultado = _worker(tmp_path, "Attack on Titan S02E03.mkv", usar_exacto=False)
+    worker.run()
+
+    assert resultado.get("ok") is True
+    assert resultado["params"].titulo_usado == "Attack on Titan"  # canon rechazado -- se queda con el titulo base
+    assert resultado["params"].episodio == 3
+
+    assert (
+        "  - ⚠️ Ignorando canon de temporada por recorte: "
+        "'Attack on Titan' → 'Completely Different Show'"
+    ) in logs

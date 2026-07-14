@@ -1,19 +1,38 @@
 # Known Limitations
 
-## Fallback de AniList + temporada explícita en filename
+## [CORREGIDO] Fallback de AniList + temporada explícita en filename
 
-Si Jikan está caído (agota reintentos) Y el nombre de archivo trae
+Si Jikan estaba caído (agotaba reintentos) Y el nombre de archivo traía
 temporada explícita (ej. "S02E05"), el resultado de AniList (claves
-`id`/`idMal`) se pasa a jikan_resolver_temporada_por_sequel, que
-espera el shape de respuesta de Jikan (clave `mal_id`) — esto
-rompería en ese cruce específico. No cubierto en el fallback actual
-(commit f2ff3c5) porque requiere una fase aparte para traducir entre
-los dos formatos o para portar la navegación de secuela a AniList
-también (como se discutió inicialmente para esta feature).
+`id`/`idMal`) se pasaba a `jikan_resolver_temporada_por_sequel` /
+`jikan_navegar_por_episodio`, que esperan el shape de respuesta de Jikan
+(clave `mal_id`) — esto rompía con un `KeyError` en ese cruce específico.
+No cubierto en el fallback original (commit f2ff3c5) porque requería una
+fase aparte para portar la navegación de secuela a AniList también, como
+se discutió inicialmente para esta feature.
 
-Este límite sigue abierto y es distinto del bug de títulos alternativos
-descrito abajo (ya corregido) — este otro cruce (`mal_id` en
-jikan_resolver_temporada_por_sequel) todavía no se toca.
+Corregido: se agregaron `anilist_avanzar_a_secuela`,
+`anilist_resolver_temporada_por_sequel` y `anilist_navegar_por_episodio`
+(chapterizen/anilist.py), análogos a sus pares de Jikan pero usando la
+query GraphQL de `relations` de AniList (`relationType == "SEQUEL"`,
+confirmado que distingue de `SPIN_OFF`/`SIDE_STORY` igual que el campo
+`relation` de Jikan). En `gui/workers.py`, los dos caminos de resolución
+de temporada (Camino A: temporada explícita; Camino B: detección por
+conteo de episodios) branchean por `"mal_id" in picked_base` para elegir
+la función de Jikan o de AniList según corresponda.
+
+Importante: ambas funciones de AniList son puramente mecánicas, igual
+que sus pares de Jikan — no validan el título resultante internamente.
+La decisión de aceptar o rechazar el canon resuelto
+(`_aceptar_canon_sin_perder_tokens`) sigue viviendo únicamente en
+`gui/workers.py`, en el mismo punto donde ya vivía para Jikan, así que el
+mensaje de usuario (`"⚠️ Ignorando canon de temporada por recorte…"`) es
+textualmente idéntico sin importar qué fuente resolvió el título.
+
+Cubierto por `tests/test_anilist.py` (funciones de navegación en
+aislamiento) y `tests/test_resolver_worker_integration.py`
+(`test_jikan_caido_anilist_navega_secuela_automaticamente_sin_picker` y
+`test_canon_de_secuela_anilist_rechazado_por_recorte_log_identico_a_jikan`).
 
 ## [CORREGIDO] Títulos alternativos corruptos al reintentar búsqueda en AnimeThemes
 

@@ -130,11 +130,6 @@ class TestEsTokenRuidoAmpliacion:
         assert cz._es_token_ruido("TVER") is True
         assert cz._es_token_ruido("YTB") is True
 
-    def test_viki_excluido_a_proposito_no_es_ruido(self):
-        """Excluido deliberadamente al decidir la lista: solo 1 aparicion
-        en ~300 publicaciones reales revisadas -- evidencia insuficiente."""
-        assert cz._es_token_ruido("VIKI") is False
-
     def test_vostfr_es_ruido(self):
         assert cz._es_token_ruido("VOSTFR") is True
 

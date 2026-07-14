@@ -174,16 +174,6 @@ def _aceptar_canon_sin_perder_tokens(base: str, canon: str) -> bool:
     missing = [t for t in bt if t not in ct]
     return len(missing) == 0
 
-# Codigo muerto desde el commit 895b51e: ResolverWorker (gui/resolver_worker.py)
-# reemplazo sus 3 llamadas a esta funcion por _aplicar_canon_multivariante,
-# que ademas prueba variantes oficiales de titulo antes de rechazar. Nada
-# llama a _aplicar_canon hoy -- ver docs/TECH_DEBT.md. Candidata a eliminar
-# en un futuro commit de limpieza; no se toca su logica aqui.
-def _aplicar_canon(consulta_base: str, titulo_resuelto: str, titulo_confiable: bool) -> str:
-    if titulo_confiable and titulo_resuelto and _aceptar_canon_sin_perder_tokens(consulta_base, titulo_resuelto):
-        return titulo_resuelto
-    return consulta_base
-
 def _ratio(a: str, b: str) -> float:
     # rapidfuzz devuelve 0–100, normalizamos a 0–1
     return _fuzz.ratio(a, b) / 100.0

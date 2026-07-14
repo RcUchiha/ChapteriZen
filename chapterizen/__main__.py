@@ -28,7 +28,8 @@ from PyQt6.QtWidgets import (
 from .config import VIDEO_EXTS
 from .modelos import ParametrosTrabajo, PickRequest
 from .gui.pickers import DialogoSelectorTabla
-from .gui.workers import ResolverWorker, ChapterizerWorker
+from .gui.resolver_worker import ResolverWorker
+from .gui.chapterizer_worker import ChapterizerWorker
 
 
 STYLE = """

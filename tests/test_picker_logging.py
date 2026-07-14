@@ -6,7 +6,7 @@ ResolverWorker pasan todos por aqui, asi que instrumentar el log ahi cubre
 los tres de forma uniforme sin duplicar logging en cada call site.
 """
 from chapterizen.modelos import ParametrosTrabajo, PickRequest
-from chapterizen.gui.workers import ResolverWorker
+from chapterizen.gui.resolver_worker import ResolverWorker
 
 
 def _worker(tmp_path, interactivo=True):

@@ -46,7 +46,7 @@ import httpx
 import respx
 
 from chapterizen.modelos import ParametrosTrabajo, AnimeDetectado
-from chapterizen.gui.workers import ResolverWorker, _variante_oficial_que_acepta
+from chapterizen.gui.resolver_worker import ResolverWorker, _variante_oficial_que_acepta
 
 JIKAN_ANIME        = "https://api.jikan.moe/v4/anime"
 ANILIST_GRAPHQL    = "https://graphql.anilist.co"

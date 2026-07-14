@@ -7,7 +7,7 @@ import httpx
 import respx
 
 from chapterizen.modelos import ParametrosTrabajo
-from chapterizen.gui.workers import ResolverWorker
+from chapterizen.gui.resolver_worker import ResolverWorker
 
 JIKAN_ANIME     = "https://api.jikan.moe/v4/anime"
 ANILIST_GRAPHQL = "https://graphql.anilist.co"
@@ -101,7 +101,7 @@ def test_titulos_alternativos_de_item_anilist_son_strings_limpios(tmp_path, monk
     pero item['title'] en AniList es un dict, no un string -- así que la
     consulta enviada a AnimeThemes terminaba siendo el repr completo del
     dict, ej. "{'romaji': 'Mato Seihei no Slave', 'english': None, ...}"."""
-    from chapterizen.gui import workers as workers_mod
+    from chapterizen.gui import resolver_worker as workers_mod
 
     anilist_item = {
         "id": 12345,

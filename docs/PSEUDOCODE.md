@@ -312,176 +312,86 @@ FIN ALGORITMO
 
 ## 3. Diagrama de flujo en texto
 
-```
-                              ┌─────────────────────────┐
-                              │  Usuario elige video y  │
-                              │  presiona "Generar XML" │
-                              └────────────┬────────────┘
-                                           │
-                                           ▼
-                              ┌─────────────────────────┐
-                              │   ¿Título usable en el   │
-                              │   nombre de archivo?     │
-                              └──────┬─────────────┬─────┘
-                                 SÍ  │             │  NO
-                                     │             ▼
-                                     │   ┌─────────────────────────┐
-                                     │   │ Identificar por          │
-                                     │   │ fotogramas (trace.moe)   │
-                                     │   └────────────┬─────────────┘
-                                     │                │
-                                     │                ▼
-                                     │   ┌─────────────────────────┐
-                                     │   │ ¿Similitud ≥ 95% con     │
-                                     │   │ ID de AniList disponible?│
-                                     │   └──────┬─────────────┬─────┘
-                                     │       SÍ  │             │ NO
-                                     │           │             │
-                                     │           ▼             │
-                                     │  ┌──────────────────┐   │
-                                     │  │ Título confirmado │   │
-                                     │  │ (se salta Jikan)  │   │
-                                     │  └─────────┬─────────┘   │
-                                     │            │             │
-                                     └────────────┼─────────────┘
-                                                  │
-                                                  ▼
-                                     ┌─────────────────────────┐
-                                     │   Buscar título en Jikan │
-                                     └──────────┬──────────────┘
-                                                │
-                                                ▼
-                                     ┌─────────────────────────┐
-                                     │  ¿Jikan caído (503/504,  │
-                                     │  reintentos agotados)?   │
-                                     └──────┬─────────────┬─────┘
-                                         SÍ  │             │ NO
-                                             ▼             │
-                                ┌─────────────────────┐    │
-                                │ Fallback: buscar en  │    │
-                                │ AniList              │    │
-                                └──────────┬───────────┘    │
-                                           │                │
-                                           └───────┬────────┘
-                                                   │
-                                                   ▼
-                                     ┌─────────────────────────┐
-                                     │  ¿Resultado ambiguo Y    │
-                                     │  hay señal para verificar│
-                                     │  cruzado (trace.moe/     │
-                                     │  AniList)?                │
-                                     └──────┬─────────────┬─────┘
-                                         SÍ  │             │ NO
-                                             ▼             │
-                                ┌─────────────────────┐    │
-                                │ ¿Coincide con         │    │
-                                │ verificación cruzada? │    │
-                                └───┬─────────────┬─────┘    │
-                                 SÍ │          NO │           │
-                                    │             ▼           │
-                                    │   ┌──────────────────┐  │
-                                    │   │ 🖱️ PICKER:        │  │
-                                    │   │ discrepancia      │  │
-                                    │   │ Jikan vs AniList/ │  │
-                                    │   │ trace.moe         │  │
-                                    │   └─────────┬─────────┘  │
-                                    └─────────────┼────────────┘
-                                                  │
-                                                  ▼
-                                     ┌─────────────────────────┐
-                                     │  ¿Temporada explícita en │
-                                     │  el nombre de archivo?   │
-                                     └──────┬─────────────┬─────┘
-                                         SÍ  │             │ NO
-                                             ▼             │
-                                ┌─────────────────────┐    ▼
-                                │ Navegar cadena de    │  ┌─────────────────────┐
-                                │ secuelas (Jikan o    │  │ ¿Episodio supera el  │
-                                │ AniList) hasta la    │  │ conteo de temp. 1?   │
-                                │ temporada indicada   │  └───┬─────────────┬────┘
-                                └──────────┬───────────┘   SÍ │          NO │
-                                           │                  ▼             │
-                                           │        ┌──────────────────┐   │
-                                           │        │ Navegar secuelas  │   │
-                                           │        │ por conteo de     │   │
-                                           │        │ episodios         │   │
-                                           │        └─────────┬─────────┘   │
-                                           │                  │             │
-                                           └──────────┬───────┴─────────────┘
-                                                      │
-                                                      ▼
-                                         ┌─────────────────────────┐
-                                         │   ¿Se pidió coincidencia │
-                                         │   exacta (OP/ED)?        │
-                                         └──────┬─────────────┬─────┘
-                                             NO  │             │ SÍ
-                                                 ▼             ▼
-                                    ┌──────────────────┐  ┌─────────────────────────┐
-                                    │ (fin de Resolver, │  │  Buscar slug en          │
-                                    │  sin slug)        │  │  AnimeThemes             │
-                                    └─────────┬─────────┘  └────────────┬─────────────┘
-                                              │                          │
-                                              │                          ▼
-                                              │             ┌─────────────────────────┐
-                                              │             │  ¿Resultado ambiguo/     │
-                                              │             │  no encontrado?           │
-                                              │             └──────┬─────────────┬─────┘
-                                              │                 SÍ  │             │ NO
-                                              │                     ▼             │
-                                              │        ┌──────────────────────┐   │
-                                              │        │ 🖱️ PICKER: AnimeThemes│   │
-                                              │        │ (o respaldo vía Jikan │   │
-                                              │        │ + 🖱️ PICKER: Jikan)   │   │
-                                              │        └──────────┬───────────┘   │
-                                              │                   │               │
-                                              └─────────┬─────────┴───────────────┘
-                                                        │
-                                                        ▼
-                                          ┌───────────────────────────┐
-                                          │   Iniciar ChapterizerWorker│
-                                          └─────────────┬──────────────┘
-                                                        │
-                                                        ▼
-                                          ┌───────────────────────────┐
-                                          │  ¿Se pidió coincidencia    │
-                                          │  exacta?                   │
-                                          └──────┬──────────────┬──────┘
-                                              NO  │              │ SÍ
-                                                  ▼              ▼
-                                    ┌──────────────────┐  ┌───────────────────────────┐
-                                    │ Chapters          │  │ Descargar/cachear audio   │
-                                    │ heurísticos       │  │ OP/ED de AnimeThemes       │
-                                    │ (Intro/OP/ED por  │  └─────────────┬─────────────┘
-                                    │ proporción)        │                │
-                                    └─────────┬─────────┘                ▼
-                                              │              ┌───────────────────────────┐
-                                              │              │ Matching de audio          │
-                                              │              │ FFT → DTW (ventana         │
-                                              │              │ deslizante, zona OP y ED)   │
-                                              │              └─────────────┬─────────────┘
-                                              │                            │
-                                              │                            ▼
-                                              │              ┌───────────────────────────┐
-                                              │              │  ¿Se encontró match de      │
-                                              │              │  OP y/o ED?                 │
-                                              │              └──────┬──────────────┬───────┘
-                                              │                  NO │           SÍ │
-                                              │                     ▼               ▼
-                                              │        ┌──────────────────┐  ┌──────────────────┐
-                                              │        │ Chapters          │  │ Chapters exactos  │
-                                              │        │ heurísticos       │  │ desde las marcas  │
-                                              │        │ (respaldo)        │  │ de tiempo del     │
-                                              │        │                   │  │ match de audio    │
-                                              │        └─────────┬─────────┘  └─────────┬─────────┘
-                                              │                  │                       │
-                                              └──────────────────┴───────────┬───────────┘
-                                                                             │
-                                                                             ▼
-                                                              ┌───────────────────────────┐
-                                                              │  Guardar XML de capítulos  │
-                                                              │  y mostrar éxito al usuario │
-                                                              └───────────────────────────┘
+```mermaid
+flowchart TD
+    A(["Usuario elige video y presiona 'Generar XML'"]) --> B{"¿Título usable en el nombre de archivo?"}
+    B -->|Sí| F["Buscar título en Jikan"]
+    B -->|No| C["Identificar por fotogramas (trace.moe)"]
+    C --> D{"¿Similitud ≥ 95% y hay ID de AniList disponible?"}
+    D -->|Sí| E["Título confirmado por AniList (se salta Jikan y la resolución de temporada)"]
+    D -->|No| F
 
-   (En cualquier punto del proceso, un error irrecuperable corta el
-    flujo y muestra un mensaje de error en vez de continuar.)
+    F --> G{"¿Jikan caído? (503/504, reintentos agotados)"}
+    G -->|Sí| H["Fallback: buscar título en AniList"]
+    G -->|No| I{"¿Título confiable?"}
+    H --> I
+
+    I -->|Sí| N{"¿Temporada explícita en el archivo, con resultado base disponible? (Camino A)"}
+    I -->|No| J{"¿La identificación original vino de trace.moe?"}
+
+    J -->|No, vino del nombre de archivo| K{"¿ts1 ≥ 0.85 y hay resultado de Jikan?"}
+    K -->|Sí| K1["Verificar con trace.moe (nueva identificación por fotogramas)"]
+    K -->|No| N
+    K1 --> K2["Obtener título de AniList por el ID detectado"]
+    K2 --> L{"¿Coincide con el título de Jikan?"}
+
+    J -->|Sí, ya vino de trace.moe| M{"¿Hay anilist_id ya detectado y resultado de Jikan?"}
+    M -->|Sí| M1["Reutilizar anilist_id: obtener título de AniList por ID"]
+    M -->|No| N
+    M1 --> L
+
+    L -->|Sí| N
+    L -->|No| P["🖱️ PICKER: discrepancia Jikan vs AniList/trace.moe"]
+    P --> N
+
+    N -->|Sí, Camino A| Q["Navegar cadena de secuelas (Jikan o AniList) hasta la temporada indicada"]
+    Q --> Q1{"¿El canon preserva los tokens del archivo, directo o vía variante oficial?"}
+    Q1 -->|Sí| T{"¿Se pidió coincidencia exacta (OP/ED)?"}
+    Q1 -->|No| Q2["⚠️ Ignorar canon de temporada por recorte (se mantiene el título actual)"]
+    Q2 --> T
+
+    N -->|No| N2{"¿Temporada por defecto, con resultado base y episodio > 0? (Camino B)"}
+    N2 -->|Sí, Camino B| R{"¿Episodio supera el conteo de episodios de temporada 1?"}
+    R -->|Sí| S["Navegar secuelas por conteo de episodios"]
+    R -->|No| GB["Aplicar canon si preserva tokens (directo o vía variante oficial)"]
+    S --> GB
+    GB --> T
+
+    N2 -->|No, ninguno de los dos caminos| GC["Aplicar canon si preserva tokens (directo o vía variante oficial)"]
+    GC --> T
+
+    E --> T
+
+    T -->|No| U["Fin de ResolverWorker, sin slug"]
+    T -->|Sí| V["Buscar slug en AnimeThemes"]
+    V --> W{"¿Resultado ambiguo o no encontrado?"}
+    W -->|Sí| X["🖱️ PICKER: AnimeThemes (o respaldo vía Jikan + 🖱️ PICKER: Jikan)"]
+    W -->|No| Y["Iniciar ChapterizerWorker"]
+    X --> Y
+    U --> Y
+
+    Y --> Z{"¿Se pidió coincidencia exacta?"}
+    Z -->|No| AA["Chapters heurísticos (Intro/Opening/Ending por proporción)"]
+    Z -->|Sí| AB["Descargar y cachear audio OP/ED de AnimeThemes"]
+    AB --> AC["Buscar OP en zona inicial (FFT top-3, luego DTW)"]
+    AB --> AD["Buscar ED en zona final (FFT top-3, luego DTW)"]
+
+    AC --> AE{"¿No hay match de ED, y AnimeThemes no cataloga ED pero sí OP?"}
+    AD --> AE
+    AE -->|Sí| AF["Reintentar: buscar tema OP en la zona final"]
+    AE -->|No| AG{"¿No hay match de OP, y AnimeThemes no cataloga OP pero sí ED?"}
+    AF --> AG
+    AG -->|Sí| AH["Reintentar: buscar tema ED en la zona inicial"]
+    AG -->|No| AI{"¿Se encontró match de OP y/o ED?"}
+    AH --> AI
+
+    AI -->|No| AJ["Chapters heurísticos (respaldo)"]
+    AI -->|Sí| AK["Chapters exactos desde las marcas de tiempo del match"]
+
+    AA --> AL["Guardar XML de capítulos"]
+    AJ --> AL
+    AK --> AL
+    AL --> AM(["Mostrar éxito al usuario"])
 ```
+
+(En cualquier punto del proceso, un error irrecuperable corta el flujo y muestra un mensaje de error en vez de continuar — no representado en el diagrama para no saturarlo.)

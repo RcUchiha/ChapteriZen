@@ -7,7 +7,7 @@ from typing import Optional, Tuple, List
 from loguru import logger
 from rapidfuzz import fuzz as _fuzz
 
-from .config import _http, _reintento_http, _API_CACHE, _TTL_API_DAYS, JIKAN_ANIME, JIKAN_REL
+from .config import _http, _reintento_http, get_api_cache, _TTL_API_DAYS, JIKAN_ANIME, JIKAN_REL
 from .ffmpeg_utils import log_clv
 from .parsing import parsear_nombre_archivo
 
@@ -15,25 +15,25 @@ from .parsing import parsear_nombre_archivo
 @_reintento_http
 def jikan_buscar_anime(q: str, limite: int = 10) -> List[dict]:
     clave  = f"jikan_search:{q.strip().casefold()}:{limite}"
-    cached = _API_CACHE.get(clave)
+    cached = get_api_cache().get(clave)
     if cached is not None:
         return cached
     r = _http.get(JIKAN_ANIME, params={"q": q, "limit": limite})
     r.raise_for_status()
     result = (r.json() or {}).get("data") or []
-    _API_CACHE.set(clave, result, expire=_TTL_API_DAYS * 86400)
+    get_api_cache().set(clave, result, expire=_TTL_API_DAYS * 86400)
     return result
 
 @_reintento_http
 def jikan_relaciones(id_anime: int) -> List[dict]:
     clave  = f"jikan_rel:{id_anime}"
-    cached = _API_CACHE.get(clave)
+    cached = get_api_cache().get(clave)
     if cached is not None:
         return cached
     r = _http.get(JIKAN_REL.format(id=int(id_anime)))
     r.raise_for_status()
     result = (r.json() or {}).get("data") or []
-    _API_CACHE.set(clave, result, expire=_TTL_API_DAYS * 86400)
+    get_api_cache().set(clave, result, expire=_TTL_API_DAYS * 86400)
     return result
 
 def _avanzar_a_secuela(actual: dict, contexto: str = "") -> dict:

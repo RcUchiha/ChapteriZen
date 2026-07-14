@@ -14,7 +14,7 @@ from typing import Optional, Tuple, List
 from loguru import logger
 from rapidfuzz import fuzz as _fuzz
 
-from .config import _http, _reintento_http, _API_CACHE, _TTL_API_DAYS, ANILIST_GRAPHQL
+from .config import _http, _reintento_http, get_api_cache, _TTL_API_DAYS, ANILIST_GRAPHQL
 
 
 _ANILIST_SEARCH_QUERY = """
@@ -47,7 +47,7 @@ query ($search: String) {
 @_reintento_http
 def _anilist_buscar_media(consulta: str) -> List[dict]:
     clave  = f"anilist_search:{consulta.strip().casefold()}"
-    cached = _API_CACHE.get(clave)
+    cached = get_api_cache().get(clave)
     if cached is not None:
         return cached
     r = _http.post(
@@ -57,7 +57,7 @@ def _anilist_buscar_media(consulta: str) -> List[dict]:
     r.raise_for_status()
     data   = r.json() or {}
     result = (((data.get("data") or {}).get("Page") or {}).get("media") or [])
-    _API_CACHE.set(clave, result, expire=_TTL_API_DAYS * 86400)
+    get_api_cache().set(clave, result, expire=_TTL_API_DAYS * 86400)
     return result
 
 
@@ -205,7 +205,7 @@ def _anilist_relaciones(anilist_id: int) -> List[dict]:
     stubs livianos que exigen una segunda consulta de detalle), el node
     de AniList ya trae title/episodes/format/status completos."""
     clave  = f"anilist_rel:{anilist_id}"
-    cached = _API_CACHE.get(clave)
+    cached = get_api_cache().get(clave)
     if cached is not None:
         return cached
     r = _http.post(
@@ -215,7 +215,7 @@ def _anilist_relaciones(anilist_id: int) -> List[dict]:
     r.raise_for_status()
     data   = r.json() or {}
     edges  = (((data.get("data") or {}).get("Media") or {}).get("relations") or {}).get("edges") or []
-    _API_CACHE.set(clave, edges, expire=_TTL_API_DAYS * 86400)
+    get_api_cache().set(clave, edges, expire=_TTL_API_DAYS * 86400)
     return edges
 
 
@@ -319,7 +319,7 @@ def anilist_navegar_por_episodio(
 def anilist_titulo_por_id(anilist_id: int) -> Optional[str]:
     """Obtiene el título romaji de un anime por su ID exacto de AniList."""
     clave  = f"anilist_id:{anilist_id}"
-    cached = _API_CACHE.get(clave)
+    cached = get_api_cache().get(clave)
     if cached is not None:
         return cached
     query = """
@@ -340,5 +340,5 @@ def anilist_titulo_por_id(anilist_id: int) -> Optional[str]:
         .get("romaji")
     )
     if titulo:
-        _API_CACHE.set(clave, titulo, expire=_TTL_API_DAYS * 86400)
+        get_api_cache().set(clave, titulo, expire=_TTL_API_DAYS * 86400)
     return titulo or None

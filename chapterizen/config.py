@@ -39,10 +39,20 @@ _http = httpx.Client(
 _CACHE_DIR   = Path(user_cache_dir("ChapteriZen"))
 _THEMES_DIR  = _CACHE_DIR / "themes"          # audios OGG/WAV por slug
 _DC_PATH     = _CACHE_DIR / "api_cache"       # respuestas de API (diskcache)
-_API_CACHE   = Cache(_DC_PATH)                # TTL configurable por entrada
+_api_cache   = Cache(_DC_PATH)                # TTL configurable por entrada
 
 _TTL_API_DAYS    = 7    # respuestas de AnimeThemes/Jikan se cachean 7 días
 _TTL_THEMES_DAYS = 30   # metadatos de temas se cachean 30 días
+
+def get_api_cache() -> Cache:
+    """Accessor del singleton de cache compartido -- los modulos que
+    necesitan la cache deben llamar a esta funcion en vez de importar
+    _api_cache directamente. Como la funcion resuelve el global de este
+    modulo en cada llamada (no en el momento del import), los tests
+    pueden swapear toda la cache con un solo monkeypatch.setattr(config,
+    "_api_cache", ...) sin tener que parchear cada modulo importador por
+    separado (ver tests/conftest.py)."""
+    return _api_cache
 
 # ─────────────────────────────────────────────
 #  LOGGING (loguru)

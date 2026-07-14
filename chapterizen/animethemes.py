@@ -11,7 +11,7 @@ import httpx
 from .config import (
     _http,
     _reintento_http,
-    _API_CACHE,
+    get_api_cache,
     _TTL_API_DAYS,
     _TTL_THEMES_DAYS,
     _THEMES_DIR,
@@ -24,7 +24,7 @@ from .ffmpeg_utils import extraer_audio_wav_mono_16k
 @_reintento_http
 def buscar_anime_en_animethemes(nombre_busqueda: str) -> List[dict]:
     clave = f"at_search:{nombre_busqueda.strip().casefold()}"
-    cached = _API_CACHE.get(clave)
+    cached = get_api_cache().get(clave)
     if cached is not None:
         return cached
     r = _http.get(
@@ -34,12 +34,12 @@ def buscar_anime_en_animethemes(nombre_busqueda: str) -> List[dict]:
     r.raise_for_status()
     js      = r.json()
     result  = (((js or {}).get("search") or {}).get("anime") or [])
-    _API_CACHE.set(clave, result, expire=_TTL_API_DAYS * 86400)
+    get_api_cache().set(clave, result, expire=_TTL_API_DAYS * 86400)
     return result
 
 def obtener_anime_de_animethemes(slug: str) -> dict:
     clave  = f"at_anime:{slug}"
-    cached = _API_CACHE.get(clave)
+    cached = get_api_cache().get(clave)
     if cached is not None:
         return cached
 
@@ -66,7 +66,7 @@ def obtener_anime_de_animethemes(slug: str) -> dict:
                 result = js
             else:
                 result = {}
-            _API_CACHE.set(clave, result, expire=_TTL_THEMES_DAYS * 86400)
+            get_api_cache().set(clave, result, expire=_TTL_THEMES_DAYS * 86400)
             return result
         except httpx.HTTPStatusError as e:
             ultimo = e
@@ -172,7 +172,7 @@ def construir_cache_temas(slug: str, anime_json: dict, log, episodio: int = 0) -
 
     series_name = anime_json.get("name") or anime_json.get("slug") or "series"
     clave_serie = f"themes_meta:{slug}"
-    meta_cached = _API_CACHE.get(clave_serie)
+    meta_cached = get_api_cache().get(clave_serie)
 
     # Si la serie cambió de nombre, limpiar archivos del directorio
     if meta_cached and not _nombres_serie_iguales(meta_cached.get("nombre_serie", ""), series_name):
@@ -187,7 +187,7 @@ def construir_cache_temas(slug: str, anime_json: dict, log, episodio: int = 0) -
                 p.unlink()
             except Exception:
                 pass
-        _API_CACHE.delete(clave_serie)
+        get_api_cache().delete(clave_serie)
         meta_cached = None
 
     temas_meta: dict = (meta_cached or {}).get("temas", {})
@@ -275,7 +275,7 @@ def construir_cache_temas(slug: str, anime_json: dict, log, episodio: int = 0) -
                     log(f"  - ✅ {theme_name}: listo")
 
     # Persistir metadatos actualizados en diskcache
-    _API_CACHE.set(
+    get_api_cache().set(
         clave_serie,
         {"nombre_serie": series_name, "temas": temas_meta},
         expire=_TTL_THEMES_DAYS * 86400,

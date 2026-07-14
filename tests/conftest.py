@@ -7,28 +7,20 @@ from diskcache import Cache
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from chapterizen import config as cz_config
-from chapterizen import animethemes as cz_animethemes
-from chapterizen import jikan as cz_jikan
-from chapterizen import anilist as cz_anilist
-from chapterizen import audio_matching as cz_audio_matching
 
-# Modulos que hicieron "from .config import _API_CACHE" -- cada uno tiene su
-# propia referencia local al objeto Cache, asi que hay que parchear los 5
-# (no solo config._API_CACHE) para que todos vean la misma cache de prueba:
-# config, animethemes, jikan, anilist y audio_matching (obtener_features_con_cache).
-# trace_moe.py ya NO importa _API_CACHE directamente (anilist_titulo_por_id
-# se movio a anilist.py), asi que no aparece en esta lista.
-_MODULOS_CON_API_CACHE = (cz_config, cz_animethemes, cz_jikan, cz_anilist, cz_audio_matching)
+# jikan, animethemes, anilist y audio_matching obtienen la cache llamando a
+# config.get_api_cache() en cada uso (no guardan una referencia propia al
+# objeto Cache), asi que alcanza con parchear el singleton de config para
+# que todos vean la misma cache de prueba -- ver get_api_cache() en config.py.
 
 
 @pytest.fixture(autouse=True)
 def _fresh_api_cache(tmp_path, monkeypatch):
-    """Aisla cada test de _API_CACHE (diskcache real en disco de produccion)
+    """Aisla cada test de _api_cache (diskcache real en disco de produccion)
     para que ninguna corrida anterior/posterior contamine resultados ni los
     tests compartan estado entre si."""
     cache = Cache(str(tmp_path / "test_api_cache"))
-    for modulo in _MODULOS_CON_API_CACHE:
-        monkeypatch.setattr(modulo, "_API_CACHE", cache)
+    monkeypatch.setattr(cz_config, "_api_cache", cache)
     yield
     cache.close()
 

@@ -7,7 +7,7 @@ from typing import Optional, Tuple
 import numpy as np
 import librosa
 
-from .config import _API_CACHE, _TTL_THEMES_DAYS
+from .config import get_api_cache, _TTL_THEMES_DAYS
 
 
 # scipy es opcional: si está disponible se usa para FFT más rápida
@@ -93,11 +93,11 @@ def extraer_features(y: np.ndarray, sr: int) -> np.ndarray:
 def obtener_features_con_cache(y: np.ndarray, sr: int) -> np.ndarray:
     """Devuelve features desde caché si existen, o las extrae y las guarda."""
     clave  = _clave_features(y)
-    cached = _API_CACHE.get(clave)
+    cached = get_api_cache().get(clave)
     if cached is not None:
         return cached
     feat = extraer_features(y, sr)
-    _API_CACHE.set(clave, feat, expire=_TTL_THEMES_DAYS * 86400)
+    get_api_cache().set(clave, feat, expire=_TTL_THEMES_DAYS * 86400)
     return feat
 
 # ── paso 1: FFT para top-K candidatos ────────

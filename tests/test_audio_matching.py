@@ -1,13 +1,17 @@
 """
-Regresion para el bug de aislamiento de _API_CACHE: audio_matching.py
-hace "from .config import _API_CACHE" igual que jikan/anilist/animethemes
-(cada modulo se queda con su propia referencia al objeto Cache), pero
-quedo afuera de _MODULOS_CON_API_CACHE en conftest.py hasta este fix.
-Sin el fix, obtener_features_con_cache() habria leido/escrito la cache
-real de disco de produccion en cada corrida de test, no la cache
-temporal aislada -- dormido hasta ahora porque ningun test ejercitaba
-ese codigo (confirmado por grep antes del fix), pero listo para activarse
-apenas alguien agregara un test como este.
+Regresion para el bug de aislamiento de cache que motivo el accessor
+get_api_cache() (ver config.py): audio_matching.py hacia
+"from .config import _API_CACHE" igual que jikan/anilist/animethemes
+(cada modulo se quedaba con su propia referencia al objeto Cache), pero
+quedo afuera de la lista de modulos parcheados en conftest.py hasta que
+se detecto. Sin ese fix, obtener_features_con_cache() habria leido/escrito
+la cache real de disco de produccion en cada corrida de test.
+
+Ahora todos los modulos llaman a config.get_api_cache() en vez de guardar
+su propia referencia, asi que conftest.py solo necesita parchear
+config._api_cache una vez (ver _fresh_api_cache). Este test sigue de
+guardia por si algun modulo nuevo vuelve a importar el objeto Cache
+directamente en vez de pasar por el accessor.
 """
 import numpy as np
 
@@ -33,9 +37,6 @@ def test_audio_matching_usa_la_cache_de_prueba_no_la_de_produccion(monkeypatch):
     assert len(llamadas_a_extraer) == 1  # segunda vez: vino de cache, no se recalculo
     np.testing.assert_array_equal(feat1, feat2)
 
-    # La cache que efectivamente se uso debe ser la misma instancia de
-    # prueba que ya comparten jikan/anilist/animethemes gracias al fixture
-    # _fresh_api_cache -- no el objeto Cache original de config.py (que
-    # apunta a disco de produccion). Sin audio_matching en
-    # _MODULOS_CON_API_CACHE, esta identidad seria distinta.
-    assert cz_audio._API_CACHE is cz_jikan._API_CACHE
+    # audio_matching y jikan deben resolver al mismo objeto Cache de prueba
+    # (el que parcheo _fresh_api_cache), no al de disco de produccion.
+    assert cz_audio.get_api_cache() is cz_jikan.get_api_cache()

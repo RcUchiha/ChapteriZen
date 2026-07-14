@@ -142,12 +142,20 @@ class ResolverWorker(_BaseWorker):
         return None if cancel else idx
 
     def _pedir_pick(self, req: PickRequest) -> Optional[int]:
+        self._log(f"🖱️ Picker abierto: {req.titulo} ({len(req.filas)} opciones)")
         self._mx.lock()
         self._pick_index = None
         self._pick_ready = False
         self._mx.unlock()
         self.need_pick.emit(req)
-        return self._wait_pick()
+        idx = self._wait_pick()
+        if idx is None:
+            self._log("🖱️ Picker cancelado por el usuario.")
+        else:
+            fila      = req.filas[idx] if 0 <= idx < len(req.filas) else None
+            seleccion = " | ".join(str(c) for c in fila) if fila else f"opción #{idx}"
+            self._log(f"🖱️ Selección: {seleccion}")
+        return idx
 
     def run(self):
         try:

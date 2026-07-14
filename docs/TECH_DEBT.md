@@ -26,3 +26,25 @@ Esta divergencia es un motivo más (además de ser código duplicado sin
 mantenimiento) para eliminar `chapterizen.py` cuando corresponda. No se
 toca ahora — requiere confirmar antes que nada externo lo importe como
 módulo.
+
+## El sink de loguru se configura al importar `config.py`, sin distinguir GUI de tests/scripts
+
+`config.py` llama a `logger.remove()` + `logger.add(_LOG_DIR / "chapterizen_{time:YYYY-MM-DD}.log", ...)`
+directamente en el cuerpo del módulo (línea ~66), así que se ejecuta apenas
+alguien hace `import chapterizen` (o cualquier import que dispare
+`chapterizen/__init__.py`) — no solo cuando arranca la GUI real. Confirmado:
+correr `pytest` escribe entradas DEBUG reales (incluyendo datos sintéticos
+de fixtures, ej. títulos de prueba como "Attack on Titan"/"Shingeki no
+Kyojin") en el mismo archivo rotativo de producción que usa la GUI
+(`%LOCALAPPDATA%\ChapteriZen\ChapteriZen\Logs\` en Windows). Cualquier
+script standalone que importe el paquete tiene el mismo problema salvo que
+reemplace el sink explícitamente después del import (ver
+`scripts/calibrar_trace_moe.py`, que hace justamente eso).
+
+Mismo patrón que el bug de aislamiento de `_API_CACHE` (ver commit
+`33e5611`, `get_api_cache()`), aplicado a logging en vez de caché: un
+efecto secundario de proceso configurado incondicionalmente al importar un
+módulo, sin diferenciar quién importa. No se toca ahora — requiere decidir
+si `config.py` debe seguir configurando el sink en el import (y ofrecer un
+modo de override explícito) o si esa responsabilidad debería moverse a
+`__main__.py` (solo se configuraría al arrancar la GUI real).

@@ -109,8 +109,8 @@ def _consenso_episodio(
     )
     _warn(f"  - Dispersión entre fotogramas: {votos_str}")
     _warn(
-        f"  - ⚠️ Sin coincidencia clara de episodio — "
-        f"usando número del nombre de archivo"
+        "  - ⚠️ Sin coincidencia clara de episodio — "
+        "usando número del nombre de archivo"
     )
     return None
 

@@ -46,7 +46,7 @@ import httpx
 import respx
 
 from chapterizen.modelos import ParametrosTrabajo, AnimeDetectado
-from chapterizen.gui.workers import ResolverWorker
+from chapterizen.gui.workers import ResolverWorker, _variante_oficial_que_acepta
 
 JIKAN_ANIME        = "https://api.jikan.moe/v4/anime"
 ANILIST_GRAPHQL    = "https://graphql.anilist.co"
@@ -349,12 +349,38 @@ def test_canon_de_secuela_anilist_rechazado_por_recorte_log_identico_a_jikan(tmp
     titulo no comparte tokens significativos con el titulo base -- el
     gate vive en gui/workers.py (no en anilist.py, ver fix de esta misma
     fase), asi que el mensaje debe ser TEXTUALMENTE igual al que ya
-    produce el camino de Jikan para el mismo caso."""
+    produce el camino de Jikan para el mismo caso.
+
+    Importante (por que las 4 variantes de titulo van pobladas con texto
+    genuinamente distinto, no None como en _anilist_media): con la logica
+    multivariante (fix de esta misma fase), un campo en None se SALTA sin
+    evaluarse -- si english/native/userPreferred quedaran en None aqui,
+    este test pasaria por una razon equivocada (esas variantes nunca se
+    habrian probado de verdad, no que se probaron y fallaron). Poblarlas
+    con contenido no relacionado y verificar _variante_oficial_que_acepta
+    directamente confirma que las 3 variantes no-romaji SI se evaluaron y
+    NINGUNA coincidio -- no solo que el resultado final fue rechazo."""
+    node_sin_relacion = {
+        "id": 999, "idMal": 900999,
+        "title": {
+            "romaji":        "Completely Different Show",
+            "english":       "Some Other Anime Entirely",
+            "native":        "Mattaku Kankei Nai Bangumi",
+            "userPreferred": "Some Other Anime Entirely",
+        },
+        "synonyms": [], "format": "TV", "status": "FINISHED", "episodes": 12,
+    }
+    # Fixture invalida si alguna de estas 3 variantes quedara vacia --
+    # _variante_oficial_que_acepta las salta sin evaluarlas, y la
+    # asercion de "ninguna coincide" de abajo dejaria de ser una prueba real.
+    assert all(node_sin_relacion["title"][campo] for campo in ("english", "native", "userPreferred"))
+    assert _variante_oficial_que_acepta("Attack on Titan", node_sin_relacion) is None
+
     respx.get(JIKAN_ANIME).mock(return_value=httpx.Response(503, json={"error": "down"}))
     _mock_anilist_search_y_relations(
         media_busqueda=[_anilist_media(100, "Attack on Titan", episodes=25)],
         relaciones_por_id={
-            100: [{"relationType": "SEQUEL", "node": _anilist_media(999, "Completely Different Show", episodes=12)}],
+            100: [{"relationType": "SEQUEL", "node": node_sin_relacion}],
         },
     )
 

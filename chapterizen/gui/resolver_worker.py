@@ -374,29 +374,13 @@ class ResolverWorker(_BaseWorker):
                                 picked_season = anilist_resolver_temporada_por_sequel(picked_base, temporada)
                                 canon_season  = _titulo_principal(picked_season, "")
                             canon_season = canon_season or titulo_resuelto or consulta_base
-                            if canon_season and _aceptar_canon_sin_perder_tokens(consulta_base, canon_season):
-                                consulta_base = canon_season
-                            else:
-                                variante = (
-                                    _variante_oficial_que_acepta(consulta_base, picked_season)
-                                    if canon_season else None
-                                )
-                                if variante:
-                                    etiqueta, texto_variante = variante
-                                    self._log(
-                                        f"  - Título del archivo coincide por variante {etiqueta}: "
-                                        f"{texto_variante!r} → adoptando título romaji/principal: {canon_season!r}"
-                                    )
-                                    # Se adopta canon_season (romaji/principal), NUNCA la
-                                    # variante que hizo pasar el chequeo -- AnimeThemes indexa
-                                    # por romaji, así que adoptar la variante generaría más
-                                    # reintentos fallidos ahí, no menos (ver _variante_oficial_que_acepta).
-                                    consulta_base = canon_season
-                                else:
-                                    self._log(
-                                        f"  - ⚠️ Ignorando canon de temporada por recorte: "
-                                        f"{consulta_base!r} → {canon_season!r}"
-                                    )
+                            # titulo_confiable=True fijo (no el titulo_confiable real de
+                            # la búsqueda base, que puede ser False si Jikan quedó
+                            # ambiguo): la propia navegación de la cadena de secuelas ya
+                            # es una señal de identidad independiente de esa ambigüedad.
+                            consulta_base = self._aplicar_canon_multivariante(
+                                consulta_base, picked_season, canon_season, True, log_rechazo=True
+                            )
                         except Exception as e:
                             self._log(f"  - ⚠️ Secuela falló: {e}. Usando canon base si está disponible.")
                             consulta_base = self._aplicar_canon_multivariante(
@@ -488,6 +472,7 @@ class ResolverWorker(_BaseWorker):
         item:             Optional[dict],
         titulo_resuelto:  str,
         titulo_confiable: bool,
+        log_rechazo:      bool = False,
     ) -> str:
         """Análogo a _aplicar_canon (jikan.py), pero si consulta_base no
         preserva tokens contra titulo_resuelto (el principal/romaji)
@@ -496,8 +481,14 @@ class ResolverWorker(_BaseWorker):
         Adopta siempre titulo_resuelto si acepta — nunca la variante que
         hizo pasar el chequeo (AnimeThemes indexa por romaji, no por la
         variante). Si acepta por una variante distinta de la
-        principal, deja rastro visible en el log (mismo espíritu que el
-        de "Ignorando canon de temporada por recorte" para el rechazo)."""
+        principal, deja rastro visible en el log.
+
+        log_rechazo controla si el rechazo final (ninguna variante acepta)
+        deja también rastro en el log con "Ignorando canon de temporada
+        por recorte". Default False porque Camino B y el caso por defecto
+        rechazan en silencio hoy (comportamiento preexistente, no tocado
+        por este parámetro) -- solo Camino A (temporada explícita en el
+        archivo) pasa True, replicando el warning que antes tenía inline."""
         if not (titulo_confiable and titulo_resuelto):
             return consulta_base
         if _aceptar_canon_sin_perder_tokens(consulta_base, titulo_resuelto):
@@ -511,6 +502,11 @@ class ResolverWorker(_BaseWorker):
                     f"{texto_variante!r} → adoptando título romaji/principal: {titulo_resuelto!r}"
                 )
                 return titulo_resuelto
+        if log_rechazo:
+            self._log(
+                f"  - ⚠️ Ignorando canon de temporada por recorte: "
+                f"{consulta_base!r} → {titulo_resuelto!r}"
+            )
         return consulta_base
 
     def _verificar_y_resolver_discrepancia(

@@ -286,37 +286,61 @@ def _anilist_media(anilist_id, romaji, episodes=12):
 
 
 @respx.mock
-def test_jikan_caido_anilist_navega_secuela_automaticamente_sin_picker(tmp_path):
-    """Caso Chained Soldier: Jikan agota reintentos, AniList resuelve el
-    titulo base (unico resultado, confiable) y el filename declara
-    temporada explicita (S02) -> Camino A navega la cadena de secuelas de
-    AniList (anilist_resolver_temporada_por_sequel, conectado en esta
-    fase) y adopta el canon de temporada 2 automaticamente. AnimeThemes
-    encuentra match exacto para el titulo de temporada 2 -> no hace falta
-    picker en ningun punto del flujo."""
+def test_jikan_caido_anilist_navega_secuela_por_variante_ingles_pero_adopta_romaji(tmp_path):
+    """Caso real reportado: Jikan agota reintentos, AniList resuelve el
+    titulo base y el filename declara temporada explicita (S02) -> Camino
+    A navega la cadena de secuelas. El filename usa el titulo
+    occidentalizado ('Chained Soldier'), pero el canon de temporada 2 que
+    devuelve AniList viene en romaji ('Mato Seihei no Slave 2') --
+    AnimeThemes/AniList/MAL tratan el romaji como fuente de verdad, asi
+    que el chequeo de tokens directo fallaria por idioma. Pero la
+    variante inglesa del MISMO item ('Chained Soldier Season 2') si
+    comparte tokens con el filename, asi que el canon se acepta via esa
+    variante -- y sin embargo el titulo que se ADOPTA sigue siendo el
+    romaji (nunca la variante que hizo pasar el chequeo), porque
+    AnimeThemes indexa por romaji: adoptar la variante inglesa generaria
+    mas reintentos fallidos alli, no menos. Debe quedar un log visible
+    explicando por que se acepto un canon que a simple vista no comparte
+    tokens con el filename, y no debe hacer falta ningun picker."""
     respx.get(JIKAN_ANIME).mock(return_value=httpx.Response(503, json={"error": "down"}))
     _mock_anilist_search_y_relations(
-        media_busqueda=[_anilist_media(100, "Chained Soldier", episodes=12)],
+        media_busqueda=[_anilist_media(100, "Mato Seihei no Slave", episodes=12)],
         relaciones_por_id={
-            100: [{"relationType": "SEQUEL", "node": _anilist_media(200, "Chained Soldier Season 2", episodes=12)}],
+            100: [{
+                "relationType": "SEQUEL",
+                "node": {
+                    "id": 200, "idMal": 900200,
+                    "title": {
+                        "romaji":        "Mato Seihei no Slave 2",
+                        "english":       "Chained Soldier Season 2",
+                        "native":        None,
+                        "userPreferred": "Mato Seihei no Slave 2",
+                    },
+                    "synonyms": [], "format": "TV", "status": "FINISHED", "episodes": 12,
+                },
+            }],
         },
     )
     respx.get(ANIMETHEMES_SEARCH).mock(return_value=httpx.Response(200, json={"search": {"anime": [
-        {"name": "Chained Soldier Season 2", "year": 2025, "season": None, "slug": "chained-soldier-season-2"},
+        {"name": "Mato Seihei no Slave 2", "year": 2025, "season": None, "slug": "mato-seihei-no-slave-2"},
     ]}}))
 
     worker, logs, resultado = _worker(tmp_path, "Chained Soldier S02E03.mkv", usar_exacto=True)
     worker.run()
 
     assert resultado.get("ok") is True
-    assert resultado["params"].slug == "chained-soldier-season-2"
-    assert resultado["params"].titulo_usado == "Chained Soldier Season 2"
+    assert resultado["params"].slug == "mato-seihei-no-slave-2"
+    assert resultado["params"].titulo_usado == "Mato Seihei no Slave 2"
     assert resultado["params"].episodio == 3
 
     assert any("Jikan no disponible, usando AniList como respaldo" in l for l in logs)
     assert "• Resolviendo temporada de secuela…" in logs
     assert not any("🖱️" in l for l in logs)
     assert not any(l.startswith("  - ⚠️ Ignorando canon de temporada por recorte") for l in logs)
+    assert (
+        "  - Título del archivo coincide por variante inglés: "
+        "'Chained Soldier Season 2' → adoptando título romaji/principal: 'Mato Seihei no Slave 2'"
+    ) in logs
 
 
 @respx.mock

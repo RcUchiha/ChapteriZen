@@ -75,12 +75,48 @@ from ..jikan import (
     jikan_buscar_anime,
     jikan_titulos_desde_item,
     _aceptar_canon_sin_perder_tokens,
-    _aplicar_canon,
     _comparar_titulos_para_verificacion,
     animethemes_coincidencia_exacta_por_titulo,
     filtrar_por_token_obligatorio,
 )
 from ..naming import construir_ruta_salida
+
+
+def _variante_oficial_que_acepta(base: str, item: dict) -> Optional[Tuple[str, str]]:
+    """Busca, entre las variantes OFICIALES de título de item (sin
+    sinónimos) que no sean la principal/romaji, alguna que preserve los
+    tokens significativos de `base`.
+
+    Por qué existe: AnimeThemes/AniList/MAL tratan el título romaji como
+    fuente de verdad para el slug/canon, pero el nombre de archivo puede
+    usar una localización distinta (ej. el título occidentalizado en
+    inglés: "Chained Soldier" para "Mato Seihei no Slave"). Comparar solo
+    contra el título principal producía un falso rechazo en ese caso —
+    esta función evita eso probando las demás variantes oficiales antes
+    de rendirse. El título que el CALLER adopta si esta función encuentra
+    una coincidencia sigue siendo siempre el principal/romaji, nunca la
+    variante que hizo pasar el chequeo — eso es responsabilidad del
+    caller, no de esta función.
+
+    Devuelve (etiqueta_idioma, texto_variante) de la primera variante que
+    pasa el chequeo, o None si ninguna lo hace."""
+    if "mal_id" in item:
+        variantes = [
+            ("inglés",  item.get("title_english")),
+            ("japonés", item.get("title_japanese")),
+        ]
+    else:
+        title = item.get("title") or {}
+        variantes = [
+            ("inglés",    title.get("english")),
+            ("nativo",    title.get("native")),
+            ("preferido", title.get("userPreferred")),
+        ]
+    for etiqueta, texto in variantes:
+        texto = (texto or "").strip()
+        if texto and _aceptar_canon_sin_perder_tokens(base, texto):
+            return etiqueta, texto
+    return None
 
 
 class _BaseWorker(QThread):
@@ -362,13 +398,27 @@ class ResolverWorker(_BaseWorker):
                             if canon_season and _aceptar_canon_sin_perder_tokens(consulta_base, canon_season):
                                 consulta_base = canon_season
                             else:
-                                self._log(
-                                    f"  - ⚠️ Ignorando canon de temporada por recorte: "
-                                    f"{consulta_base!r} → {canon_season!r}"
+                                variante = (
+                                    _variante_oficial_que_acepta(consulta_base, picked_season)
+                                    if canon_season else None
                                 )
+                                if variante:
+                                    etiqueta, texto_variante = variante
+                                    self._log(
+                                        f"  - Título del archivo coincide por variante {etiqueta}: "
+                                        f"{texto_variante!r} → adoptando título romaji/principal: {canon_season!r}"
+                                    )
+                                    consulta_base = canon_season
+                                else:
+                                    self._log(
+                                        f"  - ⚠️ Ignorando canon de temporada por recorte: "
+                                        f"{consulta_base!r} → {canon_season!r}"
+                                    )
                         except Exception as e:
                             self._log(f"  - ⚠️ Secuela falló: {e}. Usando canon base si está disponible.")
-                            consulta_base = _aplicar_canon(consulta_base, titulo_resuelto, titulo_confiable)
+                            consulta_base = self._aplicar_canon_multivariante(
+                                consulta_base, picked_base, titulo_resuelto, titulo_confiable
+                            )
                     elif temporada_fue_default and picked_base is not None and episodio > 0:
                         # Camino B: filename no declaró temporada → detectar por conteo
                         # de episodios. Si ep supera el total de S1, avanzar por secuelas.
@@ -401,9 +451,13 @@ class ResolverWorker(_BaseWorker):
                                     f"  - ⚠️ Navegación por episodio fallida: {e}"
                                     " — usando episodio original."
                                 )
-                        consulta_base = _aplicar_canon(consulta_base, titulo_resuelto, titulo_confiable)
+                        consulta_base = self._aplicar_canon_multivariante(
+                            consulta_base, picked_base, titulo_resuelto, titulo_confiable
+                        )
                     else:
-                        consulta_base = _aplicar_canon(consulta_base, titulo_resuelto, titulo_confiable)
+                        consulta_base = self._aplicar_canon_multivariante(
+                            consulta_base, picked_base, titulo_resuelto, titulo_confiable
+                        )
 
             if not p.usar_exacto:
                 p.slug         = ""
@@ -444,6 +498,36 @@ class ResolverWorker(_BaseWorker):
                 raise RuntimeError("No se pudieron extraer fotogramas del video.")
             resultado, _ = identificar_anime_con_fotogramas(frames, log_fn=self._log)
             return resultado
+
+    def _aplicar_canon_multivariante(
+        self,
+        consulta_base:    str,
+        item:             Optional[dict],
+        titulo_resuelto:  str,
+        titulo_confiable: bool,
+    ) -> str:
+        """Análogo a _aplicar_canon (jikan.py), pero si consulta_base no
+        preserva tokens contra titulo_resuelto (el principal/romaji)
+        directamente, intenta además las variantes oficiales de título de
+        `item` (ver _variante_oficial_que_acepta) antes de rendirse.
+        Adopta siempre titulo_resuelto si acepta — nunca la variante que
+        hizo pasar el chequeo. Si acepta por una variante distinta de la
+        principal, deja rastro visible en el log (mismo espíritu que el
+        de "Ignorando canon de temporada por recorte" para el rechazo)."""
+        if not (titulo_confiable and titulo_resuelto):
+            return consulta_base
+        if _aceptar_canon_sin_perder_tokens(consulta_base, titulo_resuelto):
+            return titulo_resuelto
+        if item:
+            variante = _variante_oficial_que_acepta(consulta_base, item)
+            if variante:
+                etiqueta, texto_variante = variante
+                self._log(
+                    f"  - Título del archivo coincide por variante {etiqueta}: "
+                    f"{texto_variante!r} → adoptando título romaji/principal: {titulo_resuelto!r}"
+                )
+                return titulo_resuelto
+        return consulta_base
 
     def _verificar_y_resolver_discrepancia(
         self,

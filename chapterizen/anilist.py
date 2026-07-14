@@ -14,6 +14,7 @@ from loguru import logger
 from rapidfuzz import fuzz as _fuzz
 
 from .config import _http, _reintento_http, _API_CACHE, _TTL_API_DAYS, ANILIST_GRAPHQL
+from .jikan import _aceptar_canon_sin_perder_tokens
 
 
 _ANILIST_SEARCH_QUERY = """
@@ -167,6 +168,164 @@ def anilist_buscar_titulo(consulta: str) -> Tuple[str, Optional[dict], bool, flo
     )
 
     return _titulo_principal(mejor, consulta), mejor, confiable, ts1
+
+
+_ANILIST_RELATIONS_QUERY = """
+query ($id: Int) {
+  Media(id: $id, type: ANIME) {
+    relations {
+      edges {
+        relationType
+        node {
+          id
+          idMal
+          title {
+            romaji
+            english
+            native
+            userPreferred
+          }
+          synonyms
+          format
+          status
+          episodes
+        }
+      }
+    }
+  }
+}
+"""
+
+
+@_reintento_http
+def _anilist_relaciones(anilist_id: int) -> List[dict]:
+    """Devuelve los edges de relations (relationType + node completo) de
+    un Media, analogo a jikan_relaciones (jikan.py) pero en un solo
+    round-trip: a diferencia de Jikan (cuyas entries de relations son
+    stubs livianos que exigen una segunda consulta de detalle), el node
+    de AniList ya trae title/episodes/format/status completos."""
+    clave  = f"anilist_rel:{anilist_id}"
+    cached = _API_CACHE.get(clave)
+    if cached is not None:
+        return cached
+    r = _http.post(
+        ANILIST_GRAPHQL,
+        json={"query": _ANILIST_RELATIONS_QUERY, "variables": {"id": anilist_id}},
+    )
+    r.raise_for_status()
+    data   = r.json() or {}
+    edges  = (((data.get("data") or {}).get("Media") or {}).get("relations") or {}).get("edges") or []
+    _API_CACHE.set(clave, edges, expire=_TTL_API_DAYS * 86400)
+    return edges
+
+
+def anilist_avanzar_a_secuela(actual: dict, contexto: str = "") -> dict:
+    """Un paso en la cadena de secuelas de AniList. Analogo a
+    _avanzar_a_secuela (jikan.py): mismo nivel de confianza (toma el
+    primer relationType == SEQUEL sin validar de mas -- relationType ya
+    distingue SEQUEL de SPIN_OFF/SIDE_STORY, igual que el campo
+    'relation' de Jikan), pero sin el segundo round-trip que Jikan
+    necesita para el detalle del siguiente eslabon.
+
+    contexto: frase libre que se agrega al mensaje de error para indicar
+    en que paso de la cadena ocurrio el fallo (mismo patron que
+    _avanzar_a_secuela)."""
+    anilist_id = int(actual["id"])
+    edges      = _anilist_relaciones(anilist_id)
+
+    secuela = None
+    for edge in edges:
+        if (edge.get("relationType") or "").upper() == "SEQUEL":
+            secuela = edge.get("node")
+            break
+
+    if not secuela:
+        ctx = f" — {contexto}" if contexto else ""
+        raise RuntimeError(
+            f"AniList: sin secuela para '{_titulo_principal(actual, '')}'"
+            f" (anilist_id={anilist_id}){ctx}."
+        )
+    return secuela
+
+
+def anilist_resolver_temporada_por_sequel(elemento_base: dict, temporada: int) -> dict:
+    """Analogo a jikan_resolver_temporada_por_sequel (jikan.py): navega
+    la cadena de secuelas de AniList hasta el numero de temporada pedido.
+
+    A diferencia de la version Jikan, aplica _aceptar_canon_sin_perder_tokens
+    como red de seguridad al final: si el titulo del eslabon alcanzado
+    pierde tokens significativos del titulo base, se descarta el salto
+    completo y se devuelve elemento_base sin cambios (equivalente a no
+    haber navegado)."""
+    if not elemento_base or not temporada or temporada <= 1:
+        return elemento_base
+
+    titulo_base = _titulo_principal(elemento_base, "")
+    actual      = elemento_base
+    for paso in range(temporada - 1):
+        actual = anilist_avanzar_a_secuela(actual, contexto=f"paso {paso + 1}/{temporada - 1}")
+
+    titulo_actual = _titulo_principal(actual, "")
+    if titulo_actual and not _aceptar_canon_sin_perder_tokens(titulo_base, titulo_actual):
+        logger.warning(
+            f"AniList: ignorando salto de temporada por recorte de título: "
+            f"{titulo_base!r} → {titulo_actual!r}"
+        )
+        return elemento_base
+    return actual
+
+
+def anilist_navegar_por_episodio(
+    base_entry:   dict,
+    episodio_abs: int,
+) -> Tuple[dict, int, int]:
+    """Analogo a jikan_navegar_por_episodio (jikan.py): navega la cadena
+    de secuelas de AniList para ubicar episodio_abs (numeracion global
+    del archivo, sin temporada) en la temporada y episodio relativo
+    correctos. El conteo de episodios de cada eslabon ya viene incluido
+    en el node de relations (ver _anilist_relaciones) -- no hace falta
+    una consulta separada por candidato.
+
+    Devuelve (entry_anilist, episodio_relativo, numero_temporada).
+    Lanza RuntimeError si la cadena esta incompleta o falta el conteo de
+    episodios en algun eslabon.
+
+    Misma red de seguridad que anilist_resolver_temporada_por_sequel: si
+    el eslabon final pierde tokens significativos del titulo base, se
+    descarta la navegacion completa y se devuelve (base_entry,
+    episodio_abs, 1) sin cambios."""
+    titulo_base = _titulo_principal(base_entry, "")
+    actual      = base_entry
+    temp_num    = 1
+    ep_restante = episodio_abs
+
+    while True:
+        eps = actual.get("episodes")
+        try:
+            eps = int(eps) if eps else 0
+        except (TypeError, ValueError):
+            eps = 0
+
+        if eps <= 0:
+            raise RuntimeError(
+                f"AniList: '{_titulo_principal(actual, '')}' (anilist_id={actual.get('id')}) "
+                "no tiene conteo de episodios — imposible detectar temporada por conteo."
+            )
+
+        if ep_restante <= eps:
+            titulo_actual = _titulo_principal(actual, "")
+            if actual is not base_entry and titulo_actual and not _aceptar_canon_sin_perder_tokens(titulo_base, titulo_actual):
+                logger.warning(
+                    f"AniList: ignorando navegación por episodio por recorte de título: "
+                    f"{titulo_base!r} → {titulo_actual!r}"
+                )
+                return base_entry, episodio_abs, 1
+            return actual, ep_restante, temp_num
+
+        ep_restante -= eps
+        temp_num    += 1
+
+        actual = anilist_avanzar_a_secuela(actual, contexto=f"hacia temporada {temp_num}")
 
 
 @_reintento_http

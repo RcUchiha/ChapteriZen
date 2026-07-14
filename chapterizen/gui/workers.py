@@ -301,7 +301,7 @@ class ResolverWorker(_BaseWorker):
                                 " — el resultado puede no ser exacto."
                             )
                     else:
-                        self._log("  - Jikan no encontró resultados.")
+                        self._log("  - No se encontraron resultados.")
 
                     # Los dos bloques de cross-verificación que siguen son intencionalmente
                     # paralelos y no se unifican: su paso de recopilación de datos difiere

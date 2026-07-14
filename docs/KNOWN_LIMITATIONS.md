@@ -31,8 +31,8 @@ textualmente idéntico sin importar qué fuente resolvió el título.
 
 Cubierto por `tests/test_anilist.py` (funciones de navegación en
 aislamiento) y `tests/test_resolver_worker_integration.py`
-(`test_jikan_caido_anilist_navega_secuela_automaticamente_sin_picker` y
-`test_canon_de_secuela_anilist_rechazado_por_recorte_log_identico_a_jikan`).
+(`test_jikan_caido_anilist_navega_secuela_por_variante_ingles_pero_adopta_romaji`
+y `test_canon_de_secuela_anilist_rechazado_por_recorte_log_identico_a_jikan`).
 
 ## [CORREGIDO] Títulos alternativos corruptos al reintentar búsqueda en AnimeThemes
 
@@ -60,3 +60,21 @@ que extrae romaji/english/native/userPreferred y sinónimos como strings
 individuales limpios. Cubierto por
 `test_titulos_alternativos_de_item_anilist_son_strings_limpios` en
 tests/test_resolver_worker_anilist_fallback.py.
+
+## Filenames con título dual-idioma en un solo string
+
+Cuando el nombre de archivo incluye el título en dos idiomas concatenados
+dentro del mismo string parseado (ej. "Chained Soldier (Mato Seihei no
+Slave)", donde el parser no distingue el paréntesis como alt-título), la
+búsqueda inicial en AniList/Jikan con ese texto completo no encuentra
+resultados (confirmado en vivo contra AniList real: 0 resultados). Como
+picked_base queda None, ni el gate multivariante (895b51e) ni la
+navegación de secuela llegan a activarse — el flujo degrada con
+seguridad (titulo_confiable=False, sin crashear) pero probablemente
+termina en el picker manual con usar_exacto=True, perdiendo la
+resolución automática.
+
+No cubierto todavía. Posible solución futura: detectar el patrón
+"Título (Título Alterno)" durante el parsing y probar cada mitad como
+consulta separada, o extraer el paréntesis como alt-título candidato en
+vez de tratarlo como parte literal del título.

@@ -395,3 +395,62 @@ def test_canon_de_secuela_anilist_rechazado_por_recorte_log_identico_a_jikan(tmp
         "  - ⚠️ Ignorando canon de temporada por recorte: "
         "'Attack on Titan' → 'Completely Different Show'"
     ) in logs
+
+
+@respx.mock
+def test_camino_a_navega_secuela_pese_a_jikan_ambiguo(tmp_path):
+    """Test de caracterizacion (documenta el comportamiento ACTUAL, no un
+    requisito) para la discrepancia encontrada al comparar el gate de
+    Camino A contra el de _aplicar_canon_multivariante:
+
+    _aplicar_canon_multivariante exige `titulo_confiable and titulo_resuelto`
+    como primera condicion (jikan.py / resolver_worker.py) antes de
+    siquiera considerar adoptar un canon. El gate de entrada a Camino A
+    (linea ~365 de resolver_worker.py: "temporada >= 2 and picked_base and
+    not temporada_fue_default") NO exige titulo_confiable -- asi que hoy,
+    si el nombre de archivo declara temporada explicita (S02) pero Jikan
+    devolvio resultados ambiguos (titulo_confiable=False) para el titulo
+    base, Camino A igual navega la cadena de secuelas y aplica el canon
+    de esa temporada, sin haber confirmado antes que el titulo base era
+    siquiera el anime correcto.
+
+    Este test debe seguir en verde despues de unificar Camino A con
+    _aplicar_canon_multivariante, siempre que ese refactor fije
+    titulo_confiable=True explicitamente en la llamada unificada (en vez
+    de propagar el titulo_confiable real, que aqui es False) -- de lo
+    contrario se estaria cambiando el comportamiento real de la app, no
+    solo el estilo del codigo.
+
+    Setup: Jikan busca "Attack on Titan" y devuelve 2 candidatos sin
+    relacion alguna con el texto buscado (ts1 << 0.72 con ambos ->
+    confiable=False garantizado, y por debajo de 0.85 asi que tampoco
+    dispara la cross-verificacion con trace.moe). Ambos candidatos
+    apuntan (via /relations) a la misma secuela mal_id=600, cuyo titulo
+    "Attack on Titan Season 2" SI preserva los tokens del archivo -- el
+    canon se acepta directo, sin picker ni variante de idioma de por medio."""
+    respx.get(JIKAN_ANIME).mock(return_value=httpx.Response(200, json={"data": [
+        {"mal_id": 501, "title": "Unrelated Show Alpha", "type": "TV", "episodes": 25, "score": 7.0},
+        {"mal_id": 502, "title": "Unrelated Show Beta",  "type": "TV", "episodes": 24, "score": 6.9},
+    ]}))
+    relacion_sequel = {"data": [
+        {"relation": "Sequel", "entry": [{"mal_id": 600, "type": "anime"}]},
+    ]}
+    respx.get(f"{JIKAN_ANIME}/501/relations").mock(return_value=httpx.Response(200, json=relacion_sequel))
+    respx.get(f"{JIKAN_ANIME}/502/relations").mock(return_value=httpx.Response(200, json=relacion_sequel))
+    respx.get(f"{JIKAN_ANIME}/600").mock(return_value=httpx.Response(200, json={"data": {
+        "mal_id": 600, "title": "Attack on Titan Season 2", "episodes": 12,
+    }}))
+
+    worker, logs, resultado = _worker(tmp_path, "Attack on Titan S02E03.mkv", usar_exacto=False)
+    worker.run()
+
+    assert resultado.get("ok") is True
+    # El canon de temporada 2 se adopto pese a que Jikan quedo ambiguo --
+    # esto es lo que se quiere confirmar, no necesariamente lo deseable.
+    assert resultado["params"].titulo_usado == "Attack on Titan Season 2"
+    assert resultado["params"].episodio == 3
+
+    assert "  - ⚠️ Se encontraron varios animes con nombre similar — el resultado puede no ser exacto." in logs
+    assert "• Resolviendo temporada de secuela…" in logs
+    assert not any("🖱️" in l for l in logs)
+    assert not any(l.startswith("  - ⚠️ Ignorando canon de temporada por recorte") for l in logs)

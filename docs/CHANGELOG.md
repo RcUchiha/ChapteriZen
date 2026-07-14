@@ -1,3 +1,32 @@
+## [0.0.8] — 14-07-2026
+
+### Nuevas funcionalidades
+
+- **Fallback completo a AniList cuando Jikan falla**: resolución de título base, navegación de secuela/temporada, y conteo de episodios. Antes el programa dependía 100% de Jikan — si Jikan agotaba reintentos, todo el flujo de resolución fallaba sin alternativa.
+- **Logging de apertura y selección en los 3 tipos de picker manual** (discrepancia Jikan/AniList, selección de AnimeThemes, selección de Jikan), visible en el log de usuario (`🖱️ Picker abierto: ...` / `🖱️ Selección: ...`) — antes no quedaba rastro de qué picker se abrió ni qué eligió el usuario.
+- **Ampliación de detección de ruido en nombres de archivo**: `AVC`, `Multi-Subs` (en variantes pegada y con guion bajo), `PT-BR`, `SRT`, `BD` y plataformas de streaming (`BILI`, `TVER`, `YTB`, `VOSTFR`), basada en investigación de tags reales de Nyaa.si.
+
+### Correcciones de bugs
+
+- **Gate de aceptación de canon (temporada/título) ahora compara contra todas las variantes oficiales del título** (romaji/english/native/userPreferred) antes de rechazar, no solo el romaji — corrige falsos rechazos con filenames en título occidentalizado (ej. "Chained Soldier" vs. canon "Mato Seihei no Slave 2"). El título adoptado sigue siendo siempre el romaji/principal (AnimeThemes indexa por romaji), nunca la variante que hizo pasar el chequeo.
+- **Reintento de búsqueda en AnimeThemes con títulos alternativos corregido**: cuando el item base venía de AniList (sin `mal_id`), se pasaba el `repr()` completo del diccionario de título en vez de una lista de strings limpios — el texto de búsqueda quedaba corrupto (aunque el flujo caía de forma segura al picker manual, sin llegar a romper).
+
+### Refactors
+
+- **Reestructuración completa**: `chapterizen.py` monolítico (3363 líneas) dividido en un paquete de 13 módulos (`chapterizen/`). El archivo original `chapterizen.py` se mantiene intencionalmente en el repo como referencia mientras se termina de validar la nueva estructura en uso real — se eliminará en una versión futura una vez confirmada la estabilidad.
+- **Suite de tests agregada desde cero** (pytest + respx), cubriendo lógica pura, mocks de red, e integración completa de `ResolverWorker.run()` (incluyendo los 3 pickers y el fallback de AniList de punta a punta).
+
+### Documentación
+
+- Nuevo `docs/KNOWN_LIMITATIONS.md`: documenta limitaciones conocidas, incluyendo filenames con título dual-idioma en un solo string (ej. "Chained Soldier (Mato Seihei no Slave)"), que hoy hace fallar la búsqueda inicial en AniList/Jikan y degrada de forma segura al título del filename sin verificar.
+
+### Otros
+
+- Correcciones menores de estilo/consistencia en logs (mensajes que ya no asumen "Jikan" como fuente cuando en realidad respondió el fallback de AniList; f-string sin placeholders innecesario).
+- Bump de versión 0.0.7 → 0.0.8.
+
+---
+
 ## [0.0.7] — 12-07-2026
 
 ### Nuevas funcionalidades

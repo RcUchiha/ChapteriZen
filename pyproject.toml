@@ -1,6 +1,6 @@
 [project]
 name = "chapterizen"
-version = "0.0.7"
+version = "0.0.8"
 description = "Generador automatico de chapters para episodios de anime."
 authors = [{ name = "CiferrC" }]
 license = { text = "MIT" }

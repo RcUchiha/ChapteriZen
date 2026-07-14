@@ -27,6 +27,11 @@ except ImportError:
 # ── Tokens de ruido para detección rápida y predecible ──────────────────────
 # Set de tokens exactos (lowercase) que son tags de release, nunca títulos.
 # Complementado por _RE_RUIDO_TITULO para casos compuestos/pegados (e.g. "AAC2.0").
+# Lista basada en investigación real de tags de Nyaa.si -- algunos
+# candidatos (ej. "WEB" suelto) se excluyeron deliberadamente por riesgo
+# real de falso positivo confirmado con datos de AniList; ver
+# tests/test_parsing.py (TestEsTokenRuidoAmpliacion) antes de "corregir"
+# una ausencia pensando que falta agregarla.
 _RUIDO_TOKENS: frozenset = frozenset({
     "1080p", "2160p", "720p", "480p", "4k", "8k",
     "10bit", "10-bit", "8bit", "hi10p", "hi10",

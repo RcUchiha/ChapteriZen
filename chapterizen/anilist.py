@@ -1,7 +1,8 @@
 """Integracion con AniList: busqueda de anime por texto (fallback cuando
-Jikan agota reintentos, ver ResolverWorker en gui/workers.py) y lookup de
-titulo por ID (usado por trace_moe.py para resolver el titulo de un
-anilist_id detectado por consenso de fotogramas).
+Jikan agota reintentos, ver ResolverWorker en gui/resolver_worker.py),
+navegacion de la cadena de secuelas/temporada (analoga a la de jikan.py),
+y lookup de titulo por ID (usado por trace_moe.py para resolver el titulo
+de un anilist_id detectado por consenso de fotogramas).
 
 anilist_titulo_por_id vivia en trace_moe.py; se movio aqui para
 consolidar toda la logica de AniList en un solo modulo. trace_moe.py la
@@ -221,10 +222,12 @@ def _anilist_relaciones(anilist_id: int) -> List[dict]:
 def anilist_avanzar_a_secuela(actual: dict, contexto: str = "") -> dict:
     """Un paso en la cadena de secuelas de AniList. Analogo a
     _avanzar_a_secuela (jikan.py): mismo nivel de confianza (toma el
-    primer relationType == SEQUEL sin validar de mas -- relationType ya
-    distingue SEQUEL de SPIN_OFF/SIDE_STORY, igual que el campo
-    'relation' de Jikan), pero sin el segundo round-trip que Jikan
-    necesita para el detalle del siguiente eslabon.
+    primer relationType == SEQUEL sin validar de mas -- verificado con
+    datos reales de AniList que SEQUEL no se confunde con SPIN_OFF/
+    SIDE_STORY, igual que el campo 'relation' de Jikan; no agregar un
+    gate de similitud de titulo aqui sin evidencia nueva de que haga
+    falta), pero sin el segundo round-trip que Jikan necesita para el
+    detalle del siguiente eslabon.
 
     contexto: frase libre que se agrega al mensaje de error para indicar
     en que paso de la cadena ocurrio el fallo (mismo patron que
@@ -254,8 +257,9 @@ def anilist_resolver_temporada_por_sequel(elemento_base: dict, temporada: int) -
     Puramente mecanica, igual que su par de Jikan -- no valida el titulo
     resultante. La decision de aceptar o rechazar el canon (via
     _aceptar_canon_sin_perder_tokens) es responsabilidad del caller
-    (gui/workers.py), en el mismo punto donde ya se aplica para Jikan,
-    para que el mensaje de rechazo sea identico sin importar la fuente."""
+    (gui/resolver_worker.py), en el mismo punto donde ya se aplica para
+    Jikan, para que el mensaje de rechazo sea identico sin importar la
+    fuente."""
     if not elemento_base or not temporada or temporada <= 1:
         return elemento_base
 
@@ -282,8 +286,9 @@ def anilist_navegar_por_episodio(
 
     Puramente mecanica, igual que jikan_navegar_por_episodio -- no valida
     el titulo resultante (Jikan tampoco lo hace en este punto hoy; la
-    unica proteccion existente en ese camino es _aplicar_canon, generica
-    y aplicada por el caller al final del flujo)."""
+    unica proteccion existente en ese camino es _aplicar_canon_multivariante
+    (gui/resolver_worker.py), generica y aplicada por el caller al final
+    del flujo)."""
     actual      = base_entry
     temp_num    = 1
     ep_restante = episodio_abs

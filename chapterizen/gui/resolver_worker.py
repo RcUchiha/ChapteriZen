@@ -158,6 +158,12 @@ class ResolverWorker(_BaseWorker):
         return None if cancel else idx
 
     def _pedir_pick(self, req: PickRequest) -> Optional[int]:
+        """Único punto de entrada real a un picker (todas las llamadas a
+        need_pick.emit pasan por aquí, directo o vía _pedir_pick_animethemes).
+        El logging de apertura/selección/cancelación vive SOLO aquí,
+        no en cada call site, para que los 3 tipos de picker (discrepancia,
+        AnimeThemes, Jikan) queden registrados igual sin duplicar código --
+        un 4to tipo de picker futuro lo hereda gratis si pasa por acá."""
         self._log(f"🖱️ Picker abierto: {req.titulo} ({len(req.filas)} opciones)")
         self._mx.lock()
         self._pick_index = None
@@ -381,6 +387,10 @@ class ResolverWorker(_BaseWorker):
                                         f"  - Título del archivo coincide por variante {etiqueta}: "
                                         f"{texto_variante!r} → adoptando título romaji/principal: {canon_season!r}"
                                     )
+                                    # Se adopta canon_season (romaji/principal), NUNCA la
+                                    # variante que hizo pasar el chequeo -- AnimeThemes indexa
+                                    # por romaji, así que adoptar la variante generaría más
+                                    # reintentos fallidos ahí, no menos (ver _variante_oficial_que_acepta).
                                     consulta_base = canon_season
                                 else:
                                     self._log(
@@ -484,7 +494,8 @@ class ResolverWorker(_BaseWorker):
         directamente, intenta además las variantes oficiales de título de
         `item` (ver _variante_oficial_que_acepta) antes de rendirse.
         Adopta siempre titulo_resuelto si acepta — nunca la variante que
-        hizo pasar el chequeo. Si acepta por una variante distinta de la
+        hizo pasar el chequeo (AnimeThemes indexa por romaji, no por la
+        variante). Si acepta por una variante distinta de la
         principal, deja rastro visible en el log (mismo espíritu que el
         de "Ignorando canon de temporada por recorte" para el rechazo)."""
         if not (titulo_confiable and titulo_resuelto):

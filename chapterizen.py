@@ -1,6 +1,14 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 
+# Monolito original (v0.0.7) previo a la modularizacion en el paquete
+# chapterizen/ (13 modulos, ver README.md). Se mantiene intencionalmente
+# en el repo, congelado, como referencia mientras se termina de validar
+# el paquete modularizado en uso real -- NO se mantiene en paralelo (su
+# __version__ se deja en 0.0.7 a proposito, ver docs/CHANGELOG.md 0.0.8).
+# Se eliminara en una version futura una vez confirmada la estabilidad
+# del paquete. No portar fixes nuevos aqui -- van directo a chapterizen/.
+
 __author__  = "CiferrC"
 __license__ = "MIT"
 __version__ = "0.0.7"

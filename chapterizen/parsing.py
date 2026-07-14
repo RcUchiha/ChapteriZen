@@ -30,13 +30,14 @@ except ImportError:
 _RUIDO_TOKENS: frozenset = frozenset({
     "1080p", "2160p", "720p", "480p", "4k", "8k",
     "10bit", "10-bit", "8bit", "hi10p", "hi10",
-    "x264", "x265", "hevc", "av1", "h264", "h265",
-    "webrip", "webdl", "web-dl", "bdrip", "bluray", "blu-ray", "dvd",
+    "x264", "x265", "hevc", "av1", "h264", "h265", "avc",
+    "webrip", "webdl", "web-dl", "bdrip", "bluray", "blu-ray", "dvd", "bd",
     "hdr", "hdr10", "dv", "atmos",
-    "aac", "flac", "opus", "eac3", "ac3", "ddp",
-    "jpn", "eng", "spa", "lat", "sub", "subs", "msubs", "multisub", "multi",
+    "aac", "flac", "opus", "eac3", "ac3", "ddp", "srt",
+    "jpn", "eng", "spa", "lat", "pt-br", "vostfr",
+    "sub", "subs", "msubs", "multisub", "multisubs", "multi",
     "uncensored", "censored", "repack", "proper", "remux",
-    "amzn", "nf", "dsnp", "adn",
+    "amzn", "nf", "dsnp", "adn", "bili", "tver", "ytb",
 })
 
 # Palabras semánticamente débiles: títulos de 1-2 tokens formados solo por estas
@@ -60,8 +61,8 @@ _RE_RUIDO_TITULO = re.compile(
     r"|x264|x265|hevc|av1|h\.?26[45]"
     r"|web[- ]?(?:dl|rip)|webrip|bdrip|blu[- ]?ray|bluray|dvd"
     r"|hdr10\+?|hdr|dolby\s*vision|\bdv\b|atmos"
-    r"|aac\d*\.?\d*|flac|opus|eac3|ac3|ddp?\d*\.?\d*"
-    r"|jpn|eng|spa|lat|msubs?|multisub|multi|dual[- ]?audio"
+    r"|aac\d*\.?\d*|flac|opus|eac3|ac3|ddp?\d*\.?\d*|srt"
+    r"|jpn|eng|spa|lat|msubs?|multiple[-_ ]?subtitles?|multi[-_ ]?subs?|multi|dual[-_ ]?audio"
     r"|uncensored|censored|repack|proper|remux"
     r"|amzn|\bcr\b|\bnf\b|dsnp|adn)\b"
     r"|[\[\(\{][^\]\)\}]{0,90}[\]\)\}]"  # bloques entre brackets
@@ -78,7 +79,7 @@ _RE_RUIDO_TOKEN_INICIO = re.compile(
     r"|x264|x265|hevc|av1|h\.?26[45]"
     r"|web[- ]?(?:dl|rip)|webrip|bdrip|blu[- ]?ray|bluray|dvd"
     r"|hdr10\+?|hdr|dolby"
-    r"|aac|flac|opus|eac3|ac3|ddp"
+    r"|aac|flac|opus|eac3|ac3|ddp|srt"
     r"|jpn|eng|spa|lat)"
 )
 

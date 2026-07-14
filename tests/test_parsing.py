@@ -92,3 +92,67 @@ class TestTituloEsUsable:
 
     def test_titulo_un_caracter_no_usable(self):
         assert cz._titulo_es_usable("K") is False
+
+
+class TestEsTokenRuidoAmpliacion:
+    """Regresion para la ampliacion de _RUIDO_TOKENS/_RE_RUIDO_TITULO/
+    _RE_RUIDO_TOKEN_INICIO investigada contra tags reales de Nyaa.si --
+    un test por token/patron, con el caso real que lo motivo."""
+
+    def test_avc_es_ruido(self):
+        assert cz._es_token_ruido("AVC") is True
+
+    def test_multisubs_pegado_es_ruido(self):
+        assert cz._es_token_ruido("MultiSubs") is True
+
+    def test_multi_guion_bajo_subs_es_ruido(self):
+        assert cz._es_token_ruido("Multi_Subs") is True
+
+    def test_multiple_subtitle_es_ruido(self):
+        """multiple[-_ ]?subtitles? matchea tanto con espacio real (el
+        tag [Multiple Subtitle] tal cual aparece en releases) como con
+        guion/guion bajo si viniera pegado en un solo token."""
+        assert cz._es_token_ruido("Multiple Subtitle") is True
+        assert cz._es_token_ruido("Multiple Subtitles") is True
+        assert cz._es_token_ruido("Multiple-Subtitle") is True
+
+    def test_pt_br_es_ruido(self):
+        assert cz._es_token_ruido("PT-BR") is True
+
+    def test_srtx2_es_ruido(self):
+        assert cz._es_token_ruido("SRTx2") is True
+
+    def test_bd_es_ruido(self):
+        assert cz._es_token_ruido("BD") is True
+
+    def test_plataformas_streaming_bili_tver_ytb_son_ruido(self):
+        assert cz._es_token_ruido("BILI") is True
+        assert cz._es_token_ruido("TVER") is True
+        assert cz._es_token_ruido("YTB") is True
+
+    def test_viki_excluido_a_proposito_no_es_ruido(self):
+        """Excluido deliberadamente al decidir la lista: solo 1 aparicion
+        en ~300 publicaciones reales revisadas -- evidencia insuficiente."""
+        assert cz._es_token_ruido("VIKI") is False
+
+    def test_vostfr_es_ruido(self):
+        assert cz._es_token_ruido("VOSTFR") is True
+
+    def test_web_standalone_excluido_a_proposito_no_es_ruido(self):
+        """Excluido deliberadamente: hay titulos reales de AniList donde
+        'WEB' es parte legitima del titulo (ej. "Azumanga WEB Daiou",
+        confirmado con datos reales) -- agregarlo como token suelto
+        corromperia esos titulos."""
+        assert cz._es_token_ruido("WEB") is False
+
+
+class TestNoRegresionTitulosCortosConNumeros:
+    """La ampliacion de _RUIDO_TOKENS (AVC, BD, SRT, PT-BR, etc.) no debe
+    afectar la proteccion existente de titulos cortos/numericos
+    legitimos que _titulo_es_usable ya protegia antes de este cambio."""
+
+    def test_86_sigue_siendo_usable(self):
+        assert cz._titulo_es_usable("86") is True
+
+    def test_titulo_con_numeros_mob_psycho_100_sigue_usable(self):
+        assert cz._titulo_es_usable("Mob Psycho 100") is True

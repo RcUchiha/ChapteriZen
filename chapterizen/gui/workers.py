@@ -28,7 +28,7 @@ from ..ffmpeg_utils import (
 )
 from ..config import _es_error_transitorio
 from ..trace_moe import _TRACE_UMBRAL_RAPIDO, identificar_anime_con_fotogramas
-from ..anilist import anilist_buscar_titulo, anilist_titulo_por_id
+from ..anilist import anilist_buscar_titulo, anilist_titulo_por_id, anilist_titulos_desde_item
 from ..animethemes import (
     buscar_anime_en_animethemes,
     obtener_anime_de_animethemes,
@@ -554,16 +554,26 @@ class ResolverWorker(_BaseWorker):
         """
         Resuelve el slug de AnimeThemes para una consulta dada.
         Si jikan_item está disponible, busca con todos sus títulos alternativos
-        antes de abrir el selector interactivo.
+        antes de abrir el selector interactivo. jikan_item puede venir de Jikan
+        (shape con 'mal_id') o de AniList (fallback cuando Jikan agota
+        reintentos, shape con 'id'/'idMal' y sin 'mal_id') -- cada shape usa
+        su propia función de extracción de títulos porque tienen forma distinta
+        (ver anilist_titulos_desde_item vs jikan_titulos_desde_item).
         """
         self._log("• AnimeThemes (resolviendo slug)…")
 
         # Construir lista de consultas a intentar:
         # 1. La consulta base (título del archivo limpio)
-        # 2. Todos los títulos que Jikan conoce para este anime
+        # 2. Todos los títulos alternativos que la fuente (Jikan o AniList)
+        #    conoce para este anime
         consultas_a_intentar: List[str] = [consulta]
         if jikan_item:
-            for t in jikan_titulos_desde_item(jikan_item):
+            titulos_alt = (
+                jikan_titulos_desde_item(jikan_item)
+                if "mal_id" in jikan_item
+                else anilist_titulos_desde_item(jikan_item)
+            )
+            for t in titulos_alt:
                 if t and t != consulta:
                     consultas_a_intentar.append(t)
 

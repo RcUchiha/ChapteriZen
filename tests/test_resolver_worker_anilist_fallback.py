@@ -92,6 +92,69 @@ def test_jikan_y_anilist_fallan_ambos_propaga_error(tmp_path):
     assert any("Jikan no disponible, usando AniList como respaldo" in s for s in logs)
 
 
+def test_titulos_alternativos_de_item_anilist_son_strings_limpios(tmp_path, monkeypatch):
+    """Cuando jikan_item viene de AniList (fallback de Jikan agotado -- shape
+    con 'id'/'idMal', SIN 'mal_id'), _resolver_slug_con_picker debe extraer
+    los títulos alternativos con anilist_titulos_desde_item (strings sueltos:
+    romaji/english/native/userPreferred), no con jikan_titulos_desde_item.
+    Antes de este fix, jikan_titulos_desde_item hacía str(item['title']) --
+    pero item['title'] en AniList es un dict, no un string -- así que la
+    consulta enviada a AnimeThemes terminaba siendo el repr completo del
+    dict, ej. "{'romaji': 'Mato Seihei no Slave', 'english': None, ...}"."""
+    from chapterizen.gui import workers as workers_mod
+
+    anilist_item = {
+        "id": 12345,
+        "idMal": 999999,
+        "title": {
+            "romaji": "Mato Seihei no Slave",
+            "english": "Slave of the Magic Capital's Guardian Fairy",
+            "native": None,
+            "userPreferred": "Mato Seihei no Slave",
+        },
+        "synonyms": ["Guardian Fairy Slave"],
+        "format": "TV",
+        "status": "FINISHED",
+        "episodes": 12,
+    }
+
+    consultas_vistas = []
+
+    def _fake_buscar_animethemes(q):
+        consultas_vistas.append(q)
+        return []  # nunca hay match -- fuerza a intentar TODOS los títulos alternativos
+
+    def _fake_jikan_buscar_anime(consulta, limite=10):
+        return []  # respaldo final tambien vacio -- solo nos interesan las consultas intentadas
+
+    monkeypatch.setattr(workers_mod, "buscar_anime_en_animethemes", _fake_buscar_animethemes)
+    monkeypatch.setattr(workers_mod, "jikan_buscar_anime", _fake_jikan_buscar_anime)
+
+    video = tmp_path / "Mato Seihei no Slave - 01.mkv"
+    video.write_bytes(b"")
+    params = ParametrosTrabajo(
+        video=str(video),
+        carpeta_salida="",
+        crear_subcarpeta=False,
+        usar_exacto=True,
+        search_override="",
+    )
+    worker = ResolverWorker(None, params, interactivo=False)
+
+    try:
+        worker._resolver_slug_con_picker("Mato Seihei no Slave", 1, jikan_item=anilist_item)
+    except RuntimeError:
+        pass  # esperado -- no hay resultados en ningun lado, lo que nos interesa es que se intento
+
+    assert consultas_vistas  # se intentaron consultas
+    assert not any(q.startswith("{") for q in consultas_vistas), (
+        f"consulta corrupta (repr de dict) enviada a AnimeThemes: {consultas_vistas!r}"
+    )
+    assert "Mato Seihei no Slave" in consultas_vistas
+    assert "Slave of the Magic Capital's Guardian Fairy" in consultas_vistas
+    assert "Guardian Fairy Slave" in consultas_vistas
+
+
 @respx.mock
 def test_jikan_confiable_false_no_dispara_fallback_de_anilist(tmp_path):
     """Jikan responde (sin agotar reintentos) pero con multiples candidatos

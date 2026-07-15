@@ -48,3 +48,47 @@ módulo, sin diferenciar quién importa. No se toca ahora — requiere decidir
 si `config.py` debe seguir configurando el sink en el import (y ofrecer un
 modo de override explícito) o si esa responsabilidad debería moverse a
 `__main__.py` (solo se configuraría al arrancar la GUI real).
+
+## `_TRACE_UMBRAL_CONFIANZA_ALTA` (punto 5 del análisis de resolver_worker.py) evaluado y NO implementado
+
+Propuesta original: agregar un segundo umbral (distinto de
+`_TRACE_UMBRAL_RAPIDO` en `trace_moe.py`, que gobierna el corte temprano
+del loop de fotogramas) para que, en la cross-verificación
+`"id_reutilizado"` de `_verificar_y_resolver_discrepancia`
+(`resolver_worker.py`), se confíe automáticamente en el `anilist_id` ya
+detectado sin abrir el picker de discrepancia cuando la similitud cae en
+la banda 0.85–0.95 (candidatos evaluados: 0.88 / 0.90 / 0.92).
+
+**Evaluación empírica (2026-07-15):** se corrió `scripts/calibrar_trace_moe.py`
+contra 42 episodios reales de la librería del usuario (41 en una primera
+tanda + 1 exitoso al inicio de una segunda tanda que se frenó por
+agotamiento de cuota de trace.moe, ver `docs/KNOWN_LIMITATIONS.md`),
+llamando directamente a `identificar_anime_con_fotogramas()` sin sesgo
+hacia casos "difíciles" — selección diversa (títulos populares y oscuros,
+temporada explícita en idioma distinto al oficial, distintas releases/
+fansubs de un mismo episodio para chequeo cruzado).
+
+**Resultado:** la banda 0.85–0.95 no apareció ni una sola vez en los 42
+casos. Distribución marcadamente bimodal: 41/42 casos entre 96.1% y
+99.99% de similitud (verificados manualmente contra evidencia
+independiente de trace.moe — nombre de archivo, carpeta contenedora,
+releases hermanas de otro fansub convergiendo al mismo `anilist_id` — 39
+confirmados correctos, 1 marcado "sin verificar" por baja confianza
+propia en el título exacto de una obra adulta oscura, ninguno
+descartado por conveniencia), y exactamente 1 caso claramente mal
+identificado en 81.33% (Ingoku Danchi identificado como Kuroshitsuji,
+obra completamente distinta), muy por debajo de la banda de interés.
+
+**Decisión:** no implementar el segundo umbral. No hay evidencia real de
+que la banda 0.85–0.95 ocurra con frecuencia suficiente en uso real como
+para justificar la complejidad de una constante adicional — el problema
+que motivó la propuesta parece más raro en la práctica de lo asumido
+inicialmente. Esta conclusión se basa en datos reales de la librería del
+usuario (no en una muestra construida a propósito para forzar casos
+límite), y queda documentada explícitamente para que quede claro que no
+es una suposición.
+
+Si en el futuro aparece evidencia de que esta banda sí ocurre con más
+frecuencia (contenido de peor calidad de imagen, escenas más genéricas,
+un catálogo distinto), reabrir esta evaluación corriendo
+`scripts/calibrar_trace_moe.py` de nuevo en vez de asumir el valor a ojo.

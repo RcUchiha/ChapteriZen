@@ -78,3 +78,31 @@ No cubierto todavía. Posible solución futura: detectar el patrón
 "Título (Título Alterno)" durante el parsing y probar cada mitad como
 consulta separada, o extraer el paréntesis como alt-título candidato en
 vez de tratarlo como parte literal del título.
+
+## Cuota de búsquedas de trace.moe: anónima, por IP, sin reseteo documentado
+
+trace.moe limita las búsquedas anónimas por dirección IP (o prefijo /64
+en IPv6). Confirmado consultando `GET https://api.trace.moe/me`, que
+devuelve `{id, priority, concurrency, quota, quotaUsed}`. El 2026-07-15,
+tras una sesión de calibración con volumen alto (~82 videos entre dos
+tandas, ver `docs/TECH_DEBT.md` — evaluación de `_TRACE_UMBRAL_CONFIANZA_ALTA`),
+devolvió `quota: 100, quotaUsed: 100` — cuota agotada. El endpoint `/me`
+**no incluye ningún campo de reseteo** (`resetAt`, `period`, o similar) —
+no hay forma de saber desde la API si la cuota es diaria, mensual, o de
+otro tipo; no se debe asumir ninguno de esos mecanismos sin evidencia.
+
+Cuando la cuota se agota, `/search` devuelve `402 Payment Required` (no
+`429`) — `_es_error_transitorio` (`config.py`) no lo trata como
+transitorio, así que `_reintento_http` no reintenta y el fallo es
+inmediato. Con el fix de logging de `identificar_anime_con_fotogramas`
+(commit `7f733ae`), este 402 ahora queda registrado a nivel DEBUG cuando
+ocurre (antes se descartaba en silencio con `except Exception: pass`,
+sin dejar ningún rastro de la causa real).
+
+Relevancia para un usuario real: en uso normal de la GUI (un video a la
+vez, no un batch de decenas) es poco probable agotar la cuota — este
+límite se descubrió durante una calibración deliberadamente intensiva,
+no en uso típico. Pero si un usuario reporta que trace.moe "dejó de
+identificar nada" después de procesar muchos episodios en poco tiempo,
+este es el primer lugar para revisar: consultar `/me` manualmente y
+cruzar contra el log de DEBUG para confirmar si la causa real fue 402.

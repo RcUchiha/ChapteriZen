@@ -38,7 +38,10 @@ archivo de produccion.
 import csv
 import sys
 import tempfile
+import time
 from pathlib import Path
+
+_ESPERA_ENTRE_VIDEOS_SEG = 2.0  # cortesia hacia trace.moe (servicio gratuito compartido)
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
@@ -107,7 +110,7 @@ def main():
             escritor.writerow(["archivo", "similitud", "anilist_id", "titulo", "error"])
             f_csv.flush()
 
-        for video in videos:
+        for i, video in enumerate(videos):
             try:
                 r   = _identificar(video)
                 aid = "" if r.anilist_id is None else str(r.anilist_id)
@@ -117,6 +120,8 @@ def main():
                 print(f"{video.name:<45} ERROR: {e}", flush=True)
                 escritor.writerow([video.name, "", "", "", str(e)])
             f_csv.flush()
+            if i < len(videos) - 1:
+                time.sleep(_ESPERA_ENTRE_VIDEOS_SEG)
 
 
 if __name__ == "__main__":

@@ -205,3 +205,9 @@ cython_debug/
 marimo/_static/
 marimo/_lsp/
 __marimo__/
+
+# Datos crudos de scripts/calibrar_trace_moe.py: nombres de archivo reales
+# de la libreria del usuario (repo publico) -- el resumen agregado vive en
+# docs/TECH_DEBT.md, esto se queda solo local para no gastar cuota de
+# trace.moe si hace falta revisar el detalle otra vez.
+scripts/calibracion_resultados.csv

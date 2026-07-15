@@ -5,6 +5,7 @@ from pathlib import Path
 from typing import Optional, Tuple, List, Dict
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
+import httpx
 from loguru import logger
 
 from .config import _http, _reintento_http, TRACE_ENDPOINT
@@ -127,7 +128,8 @@ def identificar_anime_con_fotogramas(
     Devuelve (AnimeDetectado, n_fotogramas_enviados).
     """
     todos_tops: List[dict] = []
-    n_usados = 0
+    n_usados   = 0
+    fallos_402 = 0  # cuenta solo fallos con causa confirmada 402 (cuota agotada)
 
     # Lotes: [centro], [centro-1, centro+1], [centro-2, centro+2], …
     lotes: List[List[Path]] = []
@@ -154,6 +156,8 @@ def identificar_anime_con_fotogramas(
                     if res:
                         todos_tops.append(res[0])
                 except Exception as e:
+                    if isinstance(e, httpx.HTTPStatusError) and e.response.status_code == 402:
+                        fallos_402 += 1
                     logger.debug(
                         f"[lote {num_lote}] fotograma falló: "
                         f"{type(e).__name__}: {e}"
@@ -214,6 +218,16 @@ def identificar_anime_con_fotogramas(
         log_fn(f"  - Enviados {n_usados}/{len(rutas_fotogramas)} fotograma(s) a trace.moe")
 
     if not todos_tops:
+        # Mensaje especifico solo si el 100% de los intentos fue 402 (cuota
+        # agotada, confirmado por status code) -- no ante una mezcla de
+        # causas, para no aparentar certeza sobre una cuota agotada cuando
+        # en realidad el contenido tal vez simplemente no tuvo match.
+        if n_usados > 0 and fallos_402 == n_usados:
+            raise RuntimeError(
+                "trace.moe no tiene cuota disponible ahora mismo"
+                " (límite alcanzado) — probá más tarde o corrigiendo"
+                " el nombre de archivo."
+            )
         raise RuntimeError("trace.moe no pudo identificar el anime con los fotogramas.")
 
     if log_fn is not None and len(todos_tops) < n_usados:

@@ -137,3 +137,52 @@ def test_fallo_de_frame_queda_logueado_no_silenciado(tmp_path):
     fallos_logueados = [m for m in mensajes if "fotograma falló" in m]
     assert fallos_logueados, "no quedo ningun log del fallo real de fotograma"
     assert any("HTTPStatusError" in m and "429" in m for m in fallos_logueados)
+
+
+@respx.mock
+def test_solo_402_lanza_error_de_cuota_agotada(tmp_path):
+    """Si el 100% de los intentos de fotograma fallan con 402 (confirmado
+    por status code -- cuota anonima de trace.moe agotada, ver
+    docs/KNOWN_LIMITATIONS.md), el mensaje debe ser especifico de cuota
+    agotada, no el generico "no pudo identificar" -- para que el usuario
+    entienda que no es un problema de reconocimiento sino de limite de
+    la API, y sepa que probar mas tarde (o con el nombre de archivo)
+    tiene sentido."""
+    respx.post(TRACE_ENDPOINT).mock(
+        return_value=httpx.Response(402, json={"error": "Payment Required"})
+    )
+    frames = [
+        _frame(tmp_path, "frame_001.jpg", b"FRAME_A"),
+        _frame(tmp_path, "frame_002.jpg", b"FRAME_B"),
+    ]
+
+    with pytest.raises(RuntimeError, match="no tiene cuota disponible"):
+        cz.identificar_anime_con_fotogramas(frames)
+
+
+@respx.mock
+def test_mezcla_de_causas_no_usa_mensaje_de_cuota(tmp_path):
+    """Si solo ALGUNOS fotogramas fallan por 402 y otros por una causa
+    distinta (ej. timeout persistente), NO debe usarse el mensaje de
+    cuota agotada -- no hay certeza de que la cuota sea realmente el
+    problema (podria ser una mezcla de cuota + un problema de red
+    aparte), asi que se mantiene el mensaje generico existente en vez de
+    aparentar una causa que no esta confirmada al 100%."""
+    def _side_effect(request: httpx.Request) -> httpx.Response:
+        body = request.content
+        if b"FRAME_402" in body:
+            return httpx.Response(402, json={"error": "Payment Required"})
+        raise httpx.ConnectTimeout("boom")
+
+    respx.post(TRACE_ENDPOINT).mock(side_effect=_side_effect)
+
+    frames = [
+        _frame(tmp_path, "frame_001.jpg", b"FRAME_402"),
+        _frame(tmp_path, "frame_002.jpg", b"FRAME_TIMEOUT"),
+    ]
+
+    with pytest.raises(RuntimeError) as exc_info:
+        cz.identificar_anime_con_fotogramas(frames)
+
+    assert "no tiene cuota disponible" not in str(exc_info.value)
+    assert "no pudo identificar" in str(exc_info.value)

@@ -98,3 +98,11 @@ Si fuera el caso de que las temporadas fueran de 10 episodios y hubiera una terc
 ---
 
 11. Mejoras de UX pendientes — directorios persistentes por campo (como en SincroNyaa) y drag & drop en el campo de video.
+
+---
+
+12. Memoria de resolución entre episodios de la misma tanda — hoy cada video repite desde cero todo el pipeline de identificación (parseo de filename → trace.moe si hace falta → Jikan/AniList → cross-verificación → resolución de temporada → slug de AnimeThemes), aunque la serie ya se resolvió con el episodio anterior de la misma temporada. Lo único que cambia episodio a episodio (salvo cruce de temporada, Camino B) es el número de episodio y el matching de audio puntual.
+
+Propuesta: permitir reutilizar `(titulo_usado, slug)` ya resueltos para los siguientes episodios de la misma tanda, saltando directo a `ChapterizerWorker` con solo el episodio nuevo parseado del filename. Forma más simple sugerida: guardar `(carpeta_del_video, titulo_usado, slug)` como estado de sesión en la ventana principal (persiste mientras la GUI esté abierta, no hace falta persistencia en disco) tras un `ChapterizerWorker` exitoso, y un checkbox "Reusar identificación anterior" habilitado solo cuando el video nuevo está en la misma carpeta que el anterior.
+
+Deliberadamente sin detección automática de cruce de temporada (Camino B) al reusar — eso duplicaría de nuevo la lógica de resolución que se busca evitar ejecutar. El usuario desmarca el checkbox manualmente al empezar una temporada nueva.

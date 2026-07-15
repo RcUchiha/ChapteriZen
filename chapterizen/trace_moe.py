@@ -153,8 +153,11 @@ def identificar_anime_con_fotogramas(
                     res  = data.get("result") or []
                     if res:
                         todos_tops.append(res[0])
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug(
+                        f"[lote {num_lote}] fotograma falló: "
+                        f"{type(e).__name__}: {e}"
+                    )
 
         logger.debug(
             f"[lote {num_lote}] {n_usados - n_pre} frame(s) enviados a trace.moe → "

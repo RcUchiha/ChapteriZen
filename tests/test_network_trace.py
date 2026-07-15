@@ -12,6 +12,7 @@ import json
 import httpx
 import pytest
 import respx
+from loguru import logger
 
 from chapterizen import trace_moe as cz
 
@@ -105,3 +106,34 @@ def test_sin_resultados_lanza_runtime_error(tmp_path):
 
     with pytest.raises(RuntimeError, match="no pudo identificar"):
         cz.identificar_anime_con_fotogramas(frames)
+
+
+@respx.mock
+def test_fallo_de_frame_queda_logueado_no_silenciado(tmp_path):
+    """Regresion: un fotograma que falla (ej. 429 persistente tras agotar
+    reintentos) antes solo se descartaba con 'except Exception: pass' --
+    ni un solo rastro en ningun log, ni siquiera a nivel DEBUG. Confirmado
+    en la practica: una corrida real contra trace.moe que aparento estar
+    rate-limiteada solo dejo "0 devolvieron resultado utilizable" en el
+    log, sin ninguna pista de si la causa fue 429, timeout u otra cosa.
+    Ahora debe quedar un mensaje DEBUG con el tipo y texto de la excepcion
+    real antes de seguir con el siguiente fotograma."""
+    respx.post(TRACE_ENDPOINT).mock(
+        return_value=httpx.Response(429, json={"error": "Too Many Requests"})
+    )
+
+    mensajes: list = []
+    sink_id = logger.add(mensajes.append, level="DEBUG")
+    try:
+        frames = [
+            _frame(tmp_path, "frame_001.jpg", b"FRAME_A"),
+            _frame(tmp_path, "frame_002.jpg", b"FRAME_B"),
+        ]
+        with pytest.raises(RuntimeError, match="no pudo identificar"):
+            cz.identificar_anime_con_fotogramas(frames)
+    finally:
+        logger.remove(sink_id)
+
+    fallos_logueados = [m for m in mensajes if "fotograma falló" in m]
+    assert fallos_logueados, "no quedo ningun log del fallo real de fotograma"
+    assert any("HTTPStatusError" in m and "429" in m for m in fallos_logueados)

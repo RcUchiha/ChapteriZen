@@ -1,3 +1,31 @@
+## [0.0.9] — 16-07-2026
+
+### Nuevas funcionalidades
+
+- **Mensaje específico cuando trace.moe agota su cuota anónima (402)**. Antes, cualquier fallo de identificación por fotogramas (incluida la cuota agotada) mostraba el mismo error genérico ("trace.moe no pudo identificar el anime con los fotogramas"). Ahora, si el 100% de los fotogramas enviados falló específicamente con `402 Payment Required`, el usuario ve un mensaje claro indicando que la cuota está agotada y que puede probar más tarde o corregir el nombre de archivo. Además, cualquier fallo de fotograma (429, timeout, etc.) ahora queda registrado con su tipo y causa real a nivel DEBUG — antes se descartaba en silencio.
+
+### Correcciones de bugs
+
+- **Integración de `aniparse` corregida**: el mapeo de campos leía el schema plano de `anitopy` (`anime_title`/`anime_season`/`episode_number`) para *ambos* parsers, así que `aniparse` devolvía vacío en el 100% de los casos desde que se integró — la app funcionaba solo gracias a `anitopy`, sin la redundancia que el diseño original buscaba. Corregido leyendo el schema anidado real de `aniparse` (`series[0].title`/`season`/`episode`), junto con tres validaciones para evitar regresiones detectadas en pruebas contra 204 archivos reales: no confiar en la temporada de `aniparse` cuando coincide con el episodio detectado por `anitopy` (evita confundir "Golden Kamuy Final Season - 07" con temporada 7), preferir `anitopy` en caso de empate al elegir título (evita truncados como perder la palabra "Android" de un título real), y no confiar en el episodio de `aniparse` cuando su título quedó vacío (evita interpretar un nombre de archivo puramente numérico como número de episodio).
+- **Nombres de archivo con puntuación sin limpiar podían no disparar la identificación por fotogramas**. Releases con título largo separado por puntos (ej. `"Tojima.Wants.to.Be.a.Kamen.Rider.S01E19.I.Have.No.Regrets..."`) podían dejar un tag de episodio pegado al texto siguiente sin separador (`"...S01E19.I Have No Regrets..."`), y ese título sucio pasaba el filtro de calidad existente sin activar el fallback a trace.moe. Se agregó una detección específica (dígito y letra pegados sin separador) para este patrón, sin afectar la lógica interna de selección entre `aniparse`/`anitopy`.
+
+### Refactors
+
+- **Camino A (temporada explícita en el nombre de archivo) unificado con la lógica de aceptación de canon** que ya usaban Camino B y el caso por defecto — eliminadas ~25 líneas de lógica duplicada. Comportamiento preservado explícitamente (verificado con test de caracterización antes del cambio).
+- **Caché de APIs (`_API_CACHE`) reemplazada por un accessor `get_api_cache()`**, evitando que cada módulo importador mantenga su propia referencia al objeto — un módulo ya había quedado desincronizado de la caché de test una vez por este patrón.
+- Eliminada `_aplicar_canon`, función muerta sin ningún caller desde que se introdujo su reemplazo (`_aplicar_canon_multivariante`) en una versión anterior.
+
+### Documentación
+
+- Nueva entrada en `docs/KNOWN_LIMITATIONS.md` sobre la cuota anónima de trace.moe (por IP, sin campo de reseteo documentado en su API), para ayudar a diagnosticar si un usuario reporta que la identificación por fotogramas "dejó de responder" tras procesar muchos episodios seguidos.
+
+### Otros
+
+- Nuevos scripts de diagnóstico en `scripts/` (no forman parte de la app): calibración empírica del umbral de confianza de trace.moe, comparación de precisión `aniparse` vs `anitopy`, y simulación del camino de decisión de `ResolverWorker` sin llamadas de red — usados para validar los cambios de esta versión contra datos reales antes de tocar producción.
+- Bump de versión 0.0.8 → 0.0.9.
+
+---
+
 ## [0.0.8] — 14-07-2026
 
 ### Nuevas funcionalidades

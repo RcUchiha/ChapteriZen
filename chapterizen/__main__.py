@@ -20,7 +20,6 @@ from PyQt6.QtWidgets import (
     QVBoxLayout,
     QWidget,
     QPlainTextEdit,
-    QGroupBox,
     QFrame,
     QProgressBar,
 )
@@ -274,28 +273,6 @@ class VentanaPrincipal(QMainWindow):
         self.row_search.btn.hide()
         root.addWidget(self.row_search)
 
-        box    = QGroupBox("Parámetros de coincidencia")
-        boxlay = QHBoxLayout()
-        boxlay.setSpacing(16)
-
-        for attr, label, default, width in [
-            ("ed_sub",     "Submuestreo",                     "32",   70),
-            ("ed_portion", "Porción del theme (0.5~1.0)",     "0.90", 80),
-            ("ed_min",     "Umbral de puntuación (0.10~0.40)","0.25", 80),
-        ]:
-            col = QVBoxLayout()
-            col.setSpacing(4)
-            col.addWidget(QLabel(label.upper()))
-            field = QLineEdit(default)
-            field.setFixedWidth(width)
-            col.addWidget(field)
-            boxlay.addLayout(col)
-            setattr(self, attr, field)
-
-        boxlay.addStretch(1)
-        box.setLayout(boxlay)
-        root.addWidget(box)
-
         sep2 = QFrame()
         sep2.setObjectName("separator")
         root.addWidget(sep2)
@@ -329,7 +306,6 @@ class VentanaPrincipal(QMainWindow):
             self.row_outdir.entry,
             self.chk_subcarpeta, self.chk_exacto,
             self.row_search.entry,
-            self.ed_sub, self.ed_portion, self.ed_min,
             self.btn_run,
         ]
 
@@ -362,9 +338,6 @@ class VentanaPrincipal(QMainWindow):
                 carpeta_salida=self.row_outdir.get(),
                 crear_subcarpeta=self.chk_subcarpeta.isChecked(),
                 usar_exacto=self.chk_exacto.isChecked(),
-                submuestreo=int(self.ed_sub.text().strip() or "32"),
-                porcion_theme=float(self.ed_portion.text().strip() or "0.90"),
-                puntuacion_minima=float(self.ed_min.text().strip() or "0.25"),
                 search_override=self.row_search.get(),
             )
         except Exception as e:

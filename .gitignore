@@ -211,3 +211,9 @@ __marimo__/
 # docs/TECH_DEBT.md, esto se queda solo local para no gastar cuota de
 # trace.moe si hace falta revisar el detalle otra vez.
 scripts/calibracion_resultados.csv
+
+# Comparacion ad-hoc aniparse vs anitopy vs parsear_nombre_archivo() sobre
+# la misma muestra real -- mismo motivo que el CSV de arriba (nombres de
+# archivo reales de la libreria del usuario, repo publico). El resumen
+# de los hallazgos vive en docs/TECH_DEBT.md y docs/KNOWN_LIMITATIONS.md.
+scripts/comparacion_parsers.txt

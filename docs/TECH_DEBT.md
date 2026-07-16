@@ -92,3 +92,47 @@ Si en el futuro aparece evidencia de que esta banda sí ocurre con más
 frecuencia (contenido de peor calidad de imagen, escenas más genéricas,
 un catálogo distinto), reabrir esta evaluación corriendo
 `scripts/calibrar_trace_moe.py` de nuevo en vez de asumir el valor a ojo.
+
+## `_parsed_dict_a_campos` nunca extrae nada útil de aniparse — usa el schema de anitopy
+
+`chapterizen/parsing.py` integra aniparse como parser "principal" y anitopy
+como "respaldo" (`parsear_nombre_archivo`, línea ~279), pero `_parsed_dict_a_campos`
+(línea ~200) extrae los campos con las claves `anime_title` / `anime_season` /
+`episode_number` — ese es el schema plano de **anitopy**. La versión de
+aniparse pineada en `requirements.txt` (`aniparse==2.0.0`) devuelve un
+schema completamente distinto y anidado: `{"series": [{"title": ...,
+"season": [{"number": ...}], "episode": [{"number": ...}]}], ...}`. Ninguna
+de las claves que busca `_parsed_dict_a_campos` existe en ese dict.
+
+Confirmado en runtime (no solo leyendo el código): corriendo `aniparse.parse(...)`
+directo sobre 82 nombres de archivo reales (ver
+`scripts/comparacion_parsers.txt`, gitignoreado — nombres de la librería
+del usuario), `aniparse.parse()` sí identifica título/temporada/episodio
+correctamente en varios casos (ej. "Chained Soldier - S02E01" →
+`series[0] = {"title": "Chained Soldier", "season": [{"number": 2}],
+"episode": [{"number": 1}]}`), pero `_parsed_dict_a_campos` siempre
+devuelve `("", None, None)` para ese resultado porque busca las claves
+equivocadas. En las 82/82 filas de la muestra, `titulo` de aniparse salió
+vacío — sin una sola excepción.
+
+**Por qué no afecta el comportamiento observable hoy (por eso va acá y no
+en KNOWN_LIMITATIONS.md):** `parsear_nombre_archivo` elige el título con
+mejor `_score_titulo` entre aniparse y anitopy, y un título vacío siempre
+pierde. anitopy ha estado cargando el 100% de la extracción real desde
+que esto se rompió (o desde que se introdujo, no hay forma de saberlo sin
+revisar cuándo se fijó la versión de aniparse), sin que el merge lo note
+— por diseño el sistema tolera que una de las dos fuentes falle. El
+fallback a regex tampoco se activó ni una vez en la muestra de 82,
+consistente con que anitopy solo alcanza para producir un título usable
+en casi todos los casos.
+
+**Lo que sí se pierde:** la redundancia que el diseño original buscaba
+(dos parsers independientes verificándose / complementándose) no existe
+en la práctica — es anitopy en solitario con un colega que nunca habla.
+Si anitopy alguna vez falla en un caso donde aniparse sí hubiera
+acertado, hoy no hay ninguna red de contención ahí.
+
+No se toca ahora. Fix acotado y de bajo riesgo cuando se decida atacarlo:
+reescribir `_parsed_dict_a_campos` (o separar en dos funciones, una por
+schema) para leer `d["series"][0]["title"]` / `d["series"][0]["season"][0]["number"]`
+/ `d["series"][0]["episode"][0]["number"]` cuando el dict viene de aniparse.

@@ -79,6 +79,35 @@ No cubierto todavía. Posible solución futura: detectar el patrón
 consulta separada, o extraer el paréntesis como alt-título candidato en
 vez de tratarlo como parte literal del título.
 
+## Filenames con puntuación sin limpiar pasan `_titulo_es_usable` y no disparan el fallback a trace.moe
+
+Cuando el nombre de archivo es una release con puntos como separador y
+texto tipo "oración" pegado al título (ej. release real confirmada:
+"Tojima.Wants.to.Be.a.Kamen.Rider.S01E19.I.Have.No.Regrets.Dying.as.a.Kamen.Rider..."),
+anitopy no logra extraer temporada ni episodio (ambos quedan `None`) y el
+título resultante conserva basura sin limpiar (ej. fragmentos como
+"S01E19.I Have No Regrets..." pegados al título). Confirmado corriendo
+`parsear_nombre_archivo()` directo sobre esta release real (ver
+`scripts/comparacion_parsers.txt`, gitignoreado): el título sucio de todas
+formas pasa `_titulo_es_usable()` (es largo, no coincide con tokens de
+ruido conocidos), así que `ResolverWorker.run()` **no** activa el
+fallback a trace.moe (ese fallback solo se dispara si el título se
+considera inutilizable) — el query sucio se manda directo a Jikan/AniList
+con `episodio=0` por defecto (ya que no se pudo extraer ninguno).
+
+Contraejemplo en la misma muestra: la release japonesa del mismo episodio
+("Toujima.Tanzaburou.wa.Kamen.Rider.ni.Naritai.S01E19...") sí parsea
+correctamente (temporada=1, episodio=19, título limpio) — el problema es
+específico del patrón "título en inglés como oración completa con puntos
+como separador", no de todas las releases con puntos.
+
+No cubierto todavía. Posible solución futura: extender
+`_titulo_es_usable` (o agregar un chequeo aparte) para detectar cuando el
+título resultante retiene un patrón de episodio sin limpiar (ej.
+`S\d{1,2}E\d{1,3}` todavía presente en el string), y tratar ese caso como
+señal de que el parsing falló aunque el texto no sea "ruido" en el
+sentido que hoy chequea la función.
+
 ## Cuota de búsquedas de trace.moe: anónima, por IP, sin reseteo documentado
 
 trace.moe limita las búsquedas anónimas por dirección IP (o prefijo /64

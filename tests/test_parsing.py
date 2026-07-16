@@ -112,7 +112,17 @@ class TestTituloEsUsable:
         (el tag de episodio no se limpio del todo, con un punto residual
         entre "S01E19" y "I"), y aun asi _titulo_es_usable() lo acepta.
         Esto es lo que hoy se le manda a Jikan de verdad -- no una
-        aproximacion."""
+        aproximacion.
+
+        Deliberadamente NO se toca _titulo_es_usable para arreglar esto
+        (ver TestTituloTieneArtefactoPegado mas abajo): esta funcion
+        tambien la usa parsear_nombre_archivo() internamente para decidir
+        si confiar en el titulo del merge aniparse/anitopy o caer a su
+        propio regex de respaldo -- agregar el chequeo aca desviaria ese
+        camino interno y produciria un titulo distinto (confirmado:
+        "...Kamen Rider I Have No Regrets Dying as a Kamen Rider BILI",
+        sin ningun digito pegado) que ya no dispararia el chequeo nuevo
+        mas adelante, frustrando el objetivo real de activar trace.moe."""
         video = (
             "Tojima.Wants.to.Be.a.Kamen.Rider.S01E19.I.Have.No.Regrets."
             "Dying.as.a.Kamen.Rider.1080p.BILI.WEB-DL.AAC2.0.H.264-VARYG.mkv"
@@ -146,6 +156,64 @@ class TestTituloEsUsable:
 
     def test_titulo_un_caracter_no_usable(self):
         assert cz._titulo_es_usable("K") is False
+
+
+class TestTituloTieneArtefactoPegado:
+    """_titulo_tiene_artefacto_pegado() es deliberadamente una funcion
+    SEPARADA de _titulo_es_usable (ver docstring de la funcion en
+    parsing.py y docs/KNOWN_LIMITATIONS.md): la usa solo
+    ResolverWorker.run(), ademas de _titulo_es_usable, para decidir si
+    activar el fallback a trace.moe -- no la usa parsear_nombre_archivo()
+    internamente, para no desviar su propia decision de merge hacia
+    _fallback_regex."""
+
+    def test_tojima_kamen_rider_dispara_el_chequeo(self):
+        """Mismo titulo real que
+        TestTituloEsUsable.test_titulo_sucio_tojima_kamen_rider_es_usable_pero_no_deberia
+        -- ahi confirmamos que _titulo_es_usable no lo rechaza (y no debe
+        cambiar). Aca confirmamos que la funcion nueva SI lo detecta,
+        que es lo que le permite a ResolverWorker.run() activar trace.moe
+        para este caso sin tocar _titulo_es_usable."""
+        video = (
+            "Tojima.Wants.to.Be.a.Kamen.Rider.S01E19.I.Have.No.Regrets."
+            "Dying.as.a.Kamen.Rider.1080p.BILI.WEB-DL.AAC2.0.H.264-VARYG.mkv"
+        )
+        consulta_base = cz.inferir_consulta_desde_nombre_archivo(video)
+        consulta_base = cz.quitar_sufijo_episodio(consulta_base)
+
+        assert cz._titulo_tiene_artefacto_pegado(consulta_base) is True
+
+    def test_parsear_nombre_archivo_tojima_no_cae_a_fallback(self):
+        """Confirma que parsear_nombre_archivo() sigue confiando en el
+        resultado del merge aniparse/anitopy para este archivo (fuente=
+        "aniparse+anitopy", titulo del merge tal cual, con "S01E19.I"
+        pegado) -- NO cae a fuente="fallback". Si esto alguna vez
+        cambiara, seria señal de que _titulo_tiene_artefacto_pegado (o
+        algo equivalente) se coló de nuevo dentro de _titulo_es_usable,
+        reintroduciendo el problema que motivo separarla."""
+        video = (
+            "Tojima.Wants.to.Be.a.Kamen.Rider.S01E19.I.Have.No.Regrets."
+            "Dying.as.a.Kamen.Rider.1080p.BILI.WEB-DL.AAC2.0.H.264-VARYG.mkv"
+        )
+        r = cz.parsear_nombre_archivo(video)
+        assert r.fuente == "aniparse+anitopy"
+        assert r.titulo == (
+            "Tojima Wants to Be a Kamen Rider S01E19.I Have No Regrets "
+            "Dying as a Kamen Rider"
+        )
+        assert r.temporada == 1
+        assert r.episodio == 19
+
+    def test_titulo_limpio_representativo_no_dispara_el_chequeo(self):
+        """Representante de los 204 archivos reales evaluados (ver
+        docs/KNOWN_LIMITATIONS.md) que la simulacion confirmo que NO se
+        ven afectados por este chequeo -- titulo real, sin ningun digito
+        pegado a una letra."""
+        r = cz.parsear_nombre_archivo(
+            "[One Fansub] Sousou no Frieren - S02E05 [WebRip 1080p HEVC-10bits AAC].mkv"
+        )
+        assert r.titulo == "Sousou no Frieren"
+        assert cz._titulo_tiene_artefacto_pegado(r.titulo) is False
 
 
 class TestEsTokenRuidoAmpliacion:

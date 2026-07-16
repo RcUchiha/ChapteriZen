@@ -170,6 +170,31 @@ def _titulo_es_usable(title: str) -> bool:
     return True
 
 
+def _titulo_tiene_artefacto_pegado(title: str) -> bool:
+    """
+    Detecta un dígito y una letra pegados sin separador en el título --
+    señal de que un tag técnico (ej. "S01E19") quedó sin limpiar del todo
+    tras normalizar (confirmado con archivo real: "Tojima Wants to Be a
+    Kamen Rider S01E19.I Have No Regrets...", ver docs/KNOWN_LIMITATIONS.md).
+    _normalizar_titulo_parser solo convierte a espacio los puntos entre DOS
+    LETRAS -- un punto entre un dígito y una letra (ej. "19.I") no matchea
+    ese regex y queda pegado.
+
+    Deliberadamente SEPARADA de _titulo_es_usable, no un chequeo agregado
+    ahí adentro: _titulo_es_usable la usa también parsear_nombre_archivo()
+    para decidir internamente si confiar en el título elegido o caer a
+    _fallback_regex. Si este chequeo viviera ahí, un título con este
+    patrón desviaría a parsear_nombre_archivo() hacia su propio regex de
+    respaldo -- que puede producir un título igual de imperfecto pero
+    SIN ningún dígito pegado (confirmado: le deja pegado el tag de
+    plataforma/release en vez del de episodio), evitando que este mismo
+    chequeo se dispare de nuevo más adelante y frustrando el propósito
+    real, que es activar la identificación por fotogramas (trace.moe) en
+    ResolverWorker.run() -- el único lugar que debe llamar a esta función.
+    """
+    return bool(re.search(r"\d[a-zA-Z]|[a-zA-Z]\d", title))
+
+
 def _safe_int(x) -> Optional[int]:
     try:
         return int(x) if x is not None else None

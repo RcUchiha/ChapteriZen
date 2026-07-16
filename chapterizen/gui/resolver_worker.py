@@ -39,6 +39,7 @@ from ..parsing import (
     quitar_sufijo_episodio,
     quitar_marcador_temporada,
     _titulo_es_usable,
+    _titulo_tiene_artefacto_pegado,
     _preferir_resultados_por_temporada,
 )
 from ..jikan import (
@@ -211,7 +212,11 @@ class ResolverWorker(_BaseWorker):
                 consulta_base    = quitar_sufijo_episodio(consulta_base)
                 _via_trace_moe   = False
 
-                if not _titulo_es_usable(consulta_base) or re.fullmatch(r'\d+', consulta_base.strip()):
+                if (
+                    not _titulo_es_usable(consulta_base)
+                    or re.fullmatch(r'\d+', consulta_base.strip())
+                    or _titulo_tiene_artefacto_pegado(consulta_base)
+                ):
                     self._log("⚠️ Nombre de archivo sin título reconocible. Identificando con trace.moe…")
                     detectado      = self._identificar_con_trace_moe(video)
                     consulta_base  = quitar_sufijo_episodio(detectado.titulo)

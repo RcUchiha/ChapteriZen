@@ -132,7 +132,95 @@ en la práctica — es anitopy en solitario con un colega que nunca habla.
 Si anitopy alguna vez falla en un caso donde aniparse sí hubiera
 acertado, hoy no hay ninguna red de contención ahí.
 
-No se toca ahora. Fix acotado y de bajo riesgo cuando se decida atacarlo:
-reescribir `_parsed_dict_a_campos` (o separar en dos funciones, una por
-schema) para leer `d["series"][0]["title"]` / `d["series"][0]["season"][0]["number"]`
-/ `d["series"][0]["episode"][0]["number"]` cuando el dict viene de aniparse.
+**Actualización (2026-07-15) — evaluación empírica sobre 204 archivos
+reales, corpus completo de la librería del usuario, sin llamadas de
+red:** se corrió un harness aislado que llama a `aniparse.parse()` y
+`anitopy.parse()` directo, leyendo el schema **correcto** de cada uno
+(no el bug de arriba), y replica la lógica de merge de
+`parsear_nombre_archivo` con el mapeo de aniparse ya corregido, para
+medir qué pasaría si se arreglara `_parsed_dict_a_campos` tal cual.
+Resultado desglosado por tipo de patrón (temporada explícita, episodio
+absoluto sin marca de temporada, título dual-idioma, releases con
+puntuación sin limpiar):
+
+- **Episodio:** el merge corregido gana — 204/204 (100%) vs 203/204
+  (99.5%) de anitopy solo. Los dos parsers tienen debilidades
+  complementarias (ver causa raíz 4 abajo) y el merge las cubre sin
+  introducir ninguna regresión nueva.
+- **Temporada:** el merge corregido **empata** con anitopy solo en
+  agregado (178/204, 87.3% ambos) pero eso esconde una **regresión real
+  y reproducible**, no hipotética: en la categoría "episodio absoluto"
+  (sin marcador de temporada), el merge corregido baja a 101/102 (99.0%)
+  contra 102/102 (100%) de anitopy solo. La razón es concreta:
+
+  ```
+  Golden Kamuy Final Season - 07  (ground truth: temporada=None, episodio=7)
+    aniparse : temporada=7,    episodio=None   ← lee el "07" como TEMPORADA, no episodio
+    anitopy  : temporada=None, episodio=7       ← correcto
+    merge    : temporada=7,    episodio=7       ← INCORRECTO -- prioridad ciega a aniparse
+  ```
+
+  La lógica de merge actual (`temp_combinada = sa if sa is not None else
+  sb`) confía en la temporada de aniparse sin validar si tiene sentido.
+  Arreglar solo el mapeo de claves, sin revisar también esta prioridad,
+  cambia un acierto de anitopy por un error nuevo.
+- **Título:** empatado 204/204 (100%) entre aniparse, anitopy y el
+  merge — sin diferencia real (la brecha nominal de la primera pasada de
+  este análisis era un artefacto del ground truth, no de los parsers).
+
+**Las 17 discrepancias entre aniparse y anitopy en la muestra se reducen
+a 4 causas raíz** (no son 17 problemas independientes):
+
+1. **Confusión temporada/episodio** (Golden Kamuy, 1 archivo) — aniparse
+   interpreta el número de episodio como temporada cuando el título dice
+   "Final Season" sin dígito propio. Causa la regresión de arriba.
+2. **Pérdida de "Nth Season" textual** (Hime-sama, Medalist, Vigilante —
+   3 series) — cuando la temporada viene escrita como texto ("2nd
+   Season") en vez de tag `SxxExx`, aniparse la deja pegada al título en
+   vez de extraerla como número; anitopy sí la separa correctamente.
+3. **Truncado de "Android" en el título** (serie "Does It Count If You
+   Lose Your Innocence to an Android", 10 archivos) — aniparse corta
+   sistemáticamente esa palabra del título en todos los episodios de
+   esta serie (posible palabra en su wordlist interno tratada como
+   ruido). No afecta episodio/temporada, solo el texto del título.
+4. **Caso complementario Tojima/Toujima Kamen Rider** (2 archivos,
+   mismo episodio real, dos releases) — anitopy falla completo
+   (temporada=episodio=None) en la release con título tipo oración larga
+   con puntos; aniparse falla completo en la release con guiones
+   limpios invertidos. Cada parser cubre la debilidad del otro — este es
+   el caso que sí justifica la redundancia por la que se adoptaron los
+   dos parsers en primer lugar.
+
+**Implementado.** El diseño final combina tres correcciones, cada una
+validada por simulación aislada (individualmente y las tres juntas)
+contra los 204 archivos reales antes de tocar `parsing.py`:
+
+1. `_parsed_dict_a_campos` se separó en `_campos_desde_aniparse` (schema
+   anidado correcto) y `_campos_desde_anitopy` (schema plano, sin cambios).
+2. **Temporada** (Opción 2): se desconfía de la temporada de aniparse si
+   coincide con el episodio que leyó anitopy (evita la regresión de la
+   causa raíz 1 — confirmado, ya no ocurre).
+3. **Título**: desempate invertido hacia anitopy — aniparse solo gana un
+   empate de `_score_titulo` si lo supera estrictamente (evita el
+   truncado de "Android", causa raíz 3).
+4. **Episodio**: no se confía en el episodio de aniparse si su título
+   quedó vacío (evita el caso "12345.mkv" — aniparse interpretaba el
+   nombre de archivo puramente numérico como episodio, con su propia
+   confianza interna en 0.0; ver `test_puramente_numerico_devuelve_titulo_numerico`
+   en `tests/test_parsing.py`). Se investigó `_confidence` como señal
+   general antes de esta decisión y se descartó: no se correlaciona de
+   forma confiable con acierto/error en los 204 archivos reales (el
+   promedio de confidence es incluso más alto en los casos incorrectos
+   de temporada que en los correctos).
+
+Simulación final combinada de las tres correcciones juntas sobre los 204
+reales: **solo 1 archivo cambia** (Tojima, mejora limpia de temporada y
+episodio, título sin cambios) — los otros 203 dan exactamente el mismo
+resultado antes y después. Cubierto por
+`tests/test_parsing.py::TestCaracterizacionFixAniparseSchemaYDesempate`
+(Golden Kamuy y Android como guardas de no-regresión, Tojima como el
+único caso que cambia, Frieren como representante de los 203 sin
+cambios) y por la actualización de dos tests preexistentes que
+resultaron afectados (`test_sin_temporada_con_tag_pegado_hevc10bit...`,
+mejora real no anticipada; `test_puramente_numerico_devuelve_titulo_numerico`,
+ahora protegido explícitamente en vez de "por accidente").

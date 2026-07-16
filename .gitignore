@@ -217,3 +217,5 @@ scripts/calibracion_resultados.csv
 # archivo reales de la libreria del usuario, repo publico). El resumen
 # de los hallazgos vive en docs/TECH_DEBT.md y docs/KNOWN_LIMITATIONS.md.
 scripts/comparacion_parsers.txt
+scripts/comparacion_parsers_204.csv
+scripts/simulacion_opcion2_cambios.csv

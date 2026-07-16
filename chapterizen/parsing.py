@@ -197,11 +197,29 @@ def _parse_con_anitopy(stem: str) -> Optional[dict]:
         return None
 
 
-def _parsed_dict_a_campos(d: dict) -> tuple:
-    """Extrae (titulo, temporada, episodio) de un dict de aniparse/anitopy."""
+def _campos_desde_anitopy(d: dict) -> tuple:
+    """Extrae (titulo, temporada, episodio) del schema plano de anitopy
+    (anime_title / anime_season / episode_number a nivel raiz)."""
     titulo    = (d.get("anime_title") or "").strip()
     temporada = _safe_int(d.get("anime_season"))
     episodio  = _safe_int(d.get("episode_number"))
+    return titulo, temporada, episodio
+
+
+def _campos_desde_aniparse(d: dict) -> tuple:
+    """Extrae (titulo, temporada, episodio) del schema anidado de aniparse
+    (series[0].title / season[0].number / episode[0].number) -- distinto
+    del schema plano de anitopy. Antes de este fix, _parsed_dict_a_campos
+    usaba las claves de anitopy para leer TAMBIEN el dict de aniparse, asi
+    que aniparse siempre devolvia ("", None, None) sin excepcion (ver
+    docs/TECH_DEBT.md)."""
+    series = d.get("series") or []
+    if not series:
+        return "", None, None
+    s = series[0]
+    titulo    = (s.get("title") or "").strip()
+    temporada = _safe_int(s["season"][0].get("number")) if s.get("season") else None
+    episodio  = _safe_int(s["episode"][0].get("number")) if s.get("episode") else None
     return titulo, temporada, episodio
 
 
@@ -294,30 +312,55 @@ def parsear_nombre_archivo(ruta_video: str) -> "ParsedAnime":
     if a is None and b is None:
         return _fallback_regex(stem)
 
-    titulo_a, temp_a, ep_a = _parsed_dict_a_campos(a) if a else ("", None, None)
-    titulo_b, temp_b, ep_b = _parsed_dict_a_campos(b) if b else ("", None, None)
+    titulo_a, temp_a, ep_a = _campos_desde_aniparse(a) if a else ("", None, None)
+    titulo_b, temp_b, ep_b = _campos_desde_anitopy(b) if b else ("", None, None)
 
     # Normalizar puntos/underscores en títulos de scene releases (e.g. 'HELL.MODE.The...')
     titulo_a = _normalizar_titulo_parser(titulo_a)
     titulo_b = _normalizar_titulo_parser(titulo_b)
 
+    # No confiar en el episodio de aniparse si su título quedó vacío --
+    # señal de que aniparse no encontró texto real de título y solo
+    # interpretó números sueltos del nombre de archivo como episodio
+    # (confirmado con el caso sintético "12345.mkv": aniparse interpreta
+    # el número completo como episodio con su propia confianza en 0.0;
+    # ver docs/TECH_DEBT.md). No afecta ningún archivo real evaluado
+    # donde aniparse ya acierta el episodio -- en esos casos su título
+    # nunca queda vacío.
+    if not titulo_a:
+        ep_a = None
+
     # Merge consciente de temporada: si una biblioteca detectó season pero la otra
     # dejó el número pegado al título (e.g. "Kingdom 5" cuando season=5), limpiarlo.
-    temp_combinada = temp_a if temp_a is not None else temp_b
+    # Desconfiar de la temporada de aniparse si coincide con el episodio que
+    # leyó anitopy -- señal de que aniparse confundió un dígito de episodio
+    # con uno de temporada (confirmado con datos reales: "Golden Kamuy Final
+    # Season - 07" -- aniparse lee temporada=7 en vez de episodio=7; ver
+    # docs/TECH_DEBT.md). En ese caso se prefiere la temporada de anitopy.
+    if temp_a is not None and ep_b is not None and temp_a == ep_b:
+        temp_combinada = temp_b
+    else:
+        temp_combinada = temp_a if temp_a is not None else temp_b
     if temp_combinada:
         titulo_a = re.sub(rf"\s{temp_combinada}$", "", titulo_a).strip()
         titulo_b = re.sub(rf"\s{temp_combinada}$", "", titulo_b).strip()
 
-    # Elegir el mejor título por score de limpieza
+    # Elegir el mejor título por score de limpieza. Desempate invertido
+    # hacia anitopy: aniparse solo gana si supera estrictamente el score,
+    # no en empate -- confirmado con datos reales que un empate hoy
+    # favorecía a aniparse por defecto, y aniparse trunca palabras del
+    # título en algunos casos (ej. serie "Does It Count If You Lose Your
+    # Innocence to an Android" -- aniparse corta "Android"; ver
+    # docs/TECH_DEBT.md). anitopy es la fuente que venía siendo confiable.
     score_a = _score_titulo(titulo_a)
     score_b = _score_titulo(titulo_b)
 
-    if score_b > score_a:
-        titulo_elegido = titulo_b
-        fuente         = "anitopy" if b and not a else "aniparse+anitopy"
-    else:
+    if score_a > score_b:
         titulo_elegido = titulo_a
         fuente         = "aniparse" if a and not b else "aniparse+anitopy"
+    else:
+        titulo_elegido = titulo_b
+        fuente         = "anitopy" if b and not a else "aniparse+anitopy"
 
     # Si el título elegido sigue teniendo ruido (score < 1), caer a regex.
     # Umbral 1 en lugar de 0 para capturar falsos positivos como "Frieren 1080p".

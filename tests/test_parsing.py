@@ -95,6 +95,37 @@ class TestTituloEsUsable:
     def test_titulo_vid_2451_es_usable(self):
         assert cz._titulo_es_usable("VID 2451") is True
 
+    def test_titulo_sucio_tojima_kamen_rider_es_usable_pero_no_deberia(self):
+        """Caracterizacion del problema documentado en
+        docs/KNOWN_LIMITATIONS.md ("Filenames con puntuacion sin limpiar
+        pasan _titulo_es_usable y no disparan el fallback a trace.moe"),
+        con el archivo real que lo confirmo.
+
+        Reproduce EXACTAMENTE el camino de ResolverWorker.run()
+        (gui/resolver_worker.py): inferir_consulta_desde_nombre_archivo()
+        seguido de quitar_sufijo_episodio(), en ese orden -- el mismo
+        string que se evalua con _titulo_es_usable() ahi y que, si pasa,
+        se manda tal cual como query a Jikan.
+
+        El valor real y textual (no una descripcion) que hoy se
+        considera "usable": todavia tiene "S01E19.I" pegado sin separar
+        (el tag de episodio no se limpio del todo, con un punto residual
+        entre "S01E19" y "I"), y aun asi _titulo_es_usable() lo acepta.
+        Esto es lo que hoy se le manda a Jikan de verdad -- no una
+        aproximacion."""
+        video = (
+            "Tojima.Wants.to.Be.a.Kamen.Rider.S01E19.I.Have.No.Regrets."
+            "Dying.as.a.Kamen.Rider.1080p.BILI.WEB-DL.AAC2.0.H.264-VARYG.mkv"
+        )
+        consulta_base = cz.inferir_consulta_desde_nombre_archivo(video)
+        consulta_base = cz.quitar_sufijo_episodio(consulta_base)
+
+        assert consulta_base == (
+            "Tojima Wants to Be a Kamen Rider S01E19.I Have No Regrets "
+            "Dying as a Kamen Rider"
+        )
+        assert cz._titulo_es_usable(consulta_base) is True
+
     def test_titulo_invalido_ova(self):
         assert cz._titulo_es_usable("OVA") is False
 

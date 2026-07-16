@@ -1,11 +1,3 @@
-1. Mejorar el parsing de nombres empleando las siguientes bibliotecas, abriendo la posibilidad de mejorar la sanitización del filename, y así hacer más poderosa, por ejemplo, la función de "inferir_consulta_desde_nombre_archivo":
-  - aniparse (principal)
-  - anitopy (respaldo)
-
-Además, estas bibliotecas podrían ayudar con la tarea de resolución de metadatos del ResolverWorker, ya que también extraen datos como temporada y episodio, etc.
-
----
-
 2. Estructurar el log en etapas para pipeline más legible.
 
 Piensa así:
@@ -82,18 +74,6 @@ Ya sea poniendo marcadores en una barra de desplazamiento de video. O también c
 - **Beneficio**: Más confiabilidad, menos "Slug vacío" errors.
 
 9. Jikan como fallback — la observación es correcta: AnimeThemes ya resolvió bien sin Jikan en ese caso. Pero cambiar la arquitectura de Jikan ahora es más invasivo. Lo más pragmático por ahora es mejorar la sanitización del filename y el formato, y dejar la refactorización de Jikan para cuando hagamos la separación en módulos.
-
-10. A tener en cuenta: cuando un nombre de anime trae consigo solo el nombre de la primera temporada (sin "2ns seadon", "season 2", etc.) y contiene un número de episodio que supera el total de episodios que oficialmente tiene esa temporada, significa que probablemente es de la segunda o tercera temporada. Por ejemplo, "Jigokuraku - 25":
-  - parse_filename: title='Jigokuraku', season=1, episode=25, source='aniparse'
-  - parsed: temporada=1, episodio=25
-
-Primero debió verificar la cantidad de episodios de la primera temporada. Y al ver que no tiene el total de 25, debió hacer una suma, contemplando los 13 episodios de la primera temporada y luego 12 de la segunda temporada (si es que la segunda tiene 12) para dar un total de 25. Luego debió parsear con la segunda temporada y determinar que el episodio del que se trata es del 12. 
-
-Así pues, las líneas entes mencionadas debieron dar este resultado:
-  - parse_filename: title='Jigokuraku 2nd Season', season=2, episode=12, source='aniparse'
-  - parsed: temporada=2, episodio=12
-
-Si fuera el caso de que las temporadas fueran de 10 episodios y hubiera una tercera, debería parsear en la tercera, siendo el episodio 5 el resultante.
 
 ---
 

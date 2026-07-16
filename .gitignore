@@ -219,3 +219,8 @@ scripts/calibracion_resultados.csv
 scripts/comparacion_parsers.txt
 scripts/comparacion_parsers_204.csv
 scripts/simulacion_opcion2_cambios.csv
+
+# Salida de scripts/simular_decision_resolver.py: mismo motivo (nombres
+# de archivo reales de la libreria del usuario, repo publico). El log de
+# DEBUG (*.log) ya cae bajo el patron generico existente mas arriba.
+scripts/simulacion_decision_resolver.csv

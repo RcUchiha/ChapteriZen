@@ -79,7 +79,7 @@ No cubierto todavía. Posible solución futura: detectar el patrón
 consulta separada, o extraer el paréntesis como alt-título candidato en
 vez de tratarlo como parte literal del título.
 
-## Filenames con puntuación sin limpiar pasan `_titulo_es_usable` y no disparan el fallback a trace.moe
+## [CORREGIDO] Filenames con puntuación sin limpiar pasan `_titulo_es_usable` y no disparan el fallback a trace.moe
 
 Cuando el nombre de archivo es una release con puntos como separador y
 texto tipo "oración" pegado al título (ej. release real confirmada:
@@ -101,12 +101,34 @@ correctamente (temporada=1, episodio=19, título limpio) — el problema es
 específico del patrón "título en inglés como oración completa con puntos
 como separador", no de todas las releases con puntos.
 
-No cubierto todavía. Posible solución futura: extender
-`_titulo_es_usable` (o agregar un chequeo aparte) para detectar cuando el
-título resultante retiene un patrón de episodio sin limpiar (ej.
-`S\d{1,2}E\d{1,3}` todavía presente en el string), y tratar ese caso como
-señal de que el parsing falló aunque el texto no sea "ruido" en el
-sentido que hoy chequea la función.
+Corregido (commit `faff480`): se agregó `_titulo_tiene_artefacto_pegado`
+(`chapterizen/parsing.py`), que detecta un dígito y una letra pegados sin
+separador en el título (ej. "19.I" en el caso de arriba) — señal de que
+un tag técnico quedó sin limpiar del todo tras normalizar
+(`_normalizar_titulo_parser` solo convierte a espacio los puntos entre
+DOS LETRAS, así que un punto entre un dígito y una letra no matchea ese
+regex y queda pegado). `ResolverWorker.run()` ahora llama a esta función
+además de `_titulo_es_usable()` para decidir si activar el fallback a
+trace.moe.
+
+Se descartó deliberadamente agregar este chequeo directamente dentro de
+`_titulo_es_usable()`: esa función también la usa `parsear_nombre_archivo()`
+internamente para decidir si confiar en el título elegido entre
+aniparse/anitopy o caer a su propio regex de respaldo. Un primer intento
+de tocar `_titulo_es_usable()` pasó la simulación sobre 204 archivos
+reales (0 falsos positivos) pero generó una regresión real no capturada
+por esa simulación: para el archivo de prueba, el título con el patrón
+detectado desviaba a `parsear_nombre_archivo()` hacia su regex de
+respaldo interno, que producía un título igual de imperfecto pero **sin
+ningún dígito pegado** (le dejaba pegado el tag de plataforma/release en
+vez del de episodio) — evitando que el chequeo se disparara de nuevo en
+`ResolverWorker.run()` y frustrando el objetivo real de activar trace.moe.
+La función separada evita ese efecto secundario por completo.
+
+Cubierto por `tests/test_parsing.py::TestTituloTieneArtefactoPegado`
+(detecta el caso real, confirma que `parsear_nombre_archivo()` sigue
+devolviendo el resultado del merge sin caer a `fallback`, y no-regresión
+con un título real sin dígitos pegados).
 
 ## Cuota de búsquedas de trace.moe: anónima, por IP, sin reseteo documentado
 

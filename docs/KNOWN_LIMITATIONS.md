@@ -157,3 +157,42 @@ no en uso típico. Pero si un usuario reporta que trace.moe "dejó de
 identificar nada" después de procesar muchos episodios en poco tiempo,
 este es el primer lugar para revisar: consultar `/me` manualmente y
 cruzar contra el log de DEBUG para confirmar si la causa real fue 402.
+
+## `_THEMES_DIR` (audio OP/ED descargado) crece sin ningún límite
+
+`_THEMES_DIR` (`%LOCALAPPDATA%\ChapteriZen\Cache\themes` en Windows) guarda
+el audio OGG/WAV de cada tema descargado de AnimeThemes, organizado por
+slug de serie (`construir_cache_temas`, `chapterizen/animethemes.py`). A
+diferencia de la caché de API (`get_api_cache()`, ver entrada de arriba
+sobre la cuota de trace.moe — esa sí está acotada, ver más abajo), esta
+carpeta **no tiene ninguna política de limpieza por tamaño ni por
+antigüedad**.
+
+El único `unlink()` que existe en `construir_cache_temas` borra los
+archivos de una serie puntual solo cuando su nombre cambió en
+AnimeThemes (invalidación de metadata desactualizada, no limpieza por
+espacio). No hay TTL, no hay límite de tamaño total, no hay eviction de
+series que ya no se vuelven a procesar — cada serie nueva que pasa por
+`usar_exacto=True` agrega su OP/ED a esta carpeta para siempre.
+
+Estimación (sin medición exhaustiva, orden de magnitud): ~3 temas
+promedio por serie (OGG + WAV, ~90s c/u) ≈ **15-20 MB por serie
+procesada**, sin techo. Para uso normal (decenas de series a lo largo de
+meses) esto es modesto (cientos de MB); para un usuario muy activo con
+cientos de series distintas, podría acumular varios GB con el tiempo sin
+que nada lo purgue.
+
+**`get_api_cache()` (el diskcache de respuestas JSON de Jikan/AniList/
+AnimeThemes + features de audio precalculadas) NO tiene este problema**:
+`Cache(_DC_PATH)` (`config.py`) usa los defaults de `diskcache` sin
+sobreescribirlos — confirmado en el código real de la librería instalada
+(`DEFAULT_SETTINGS`), no asumido: `size_limit=1073741824` (1 GiB),
+`eviction_policy='least-recently-stored'`, `cull_limit=10`, y
+`Cache.set()` invoca `_cull(...)` automáticamente en cada escritura
+(borra expirados primero, y por política LRU si se supera el tamaño
+límite). No hace falta ningún cambio ahí.
+
+No cubierto todavía. Si se decide atacar, es una investigación aparte
+específica para `_THEMES_DIR` (política de limpieza por tamaño total o
+antigüedad de uso) — no relacionada con `get_api_cache()`, que ya
+resuelve esto por sí solo vía `diskcache`.

@@ -345,6 +345,76 @@ def test_jikan_caido_anilist_navega_secuela_por_variante_ingles_pero_adopta_roma
     assert resultado["params"].titulo_usado == "Mato Seihei no Slave 2"
     assert resultado["params"].episodio == 3
 
+
+@respx.mock
+def test_camino_a_no_actualiza_picked_base_a_la_temporada_resuelta_CARACTERIZACION(tmp_path, monkeypatch):
+    """Caracterizacion del comportamiento ACTUAL (bug, no un requisito):
+    en Camino A, la navegacion de secuela guarda el resultado en
+    `picked_season` (variable local de run()) pero nunca reasigna
+    `picked_base` -- a diferencia de Camino B, que si lo hace
+    (jikan_navegar_por_episodio/anilist_navegar_por_episodio reasignan
+    picked_base explicitamente). Consecuencia real: `jikan_item`, que se
+    arma como `picked_base if not override else None` y se pasa a
+    _resolver_slug_con_picker para los titulos alternativos de respaldo,
+    sigue siendo el item de la TEMPORADA 1 despues de que Camino A ya
+    resolvio y adopto el titulo de la temporada 2.
+
+    Mismo escenario real que el test anterior (Chained Soldier S02 ->
+    Mato Seihei no Slave, secuela real id=200) pero interceptando
+    _resolver_slug_con_picker para capturar el jikan_item con el que
+    seria llamado, en vez de dejar que se resuelva contra AnimeThemes.
+
+    Este test debe quedar en verde ANTES del fix (documenta el bug tal
+    cual esta) y se actualiza cuando se agregue `picked_base =
+    picked_season` en Camino A (gui/resolver_worker.py) -- en ese punto,
+    jikan_item debe pasar a ser el de la temporada 2 (id=200), no el de
+    la temporada 1 (id=100)."""
+    respx.get(JIKAN_ANIME).mock(return_value=httpx.Response(503, json={"error": "down"}))
+    _mock_anilist_search_y_relations(
+        media_busqueda=[_anilist_media(100, "Mato Seihei no Slave", episodes=12)],
+        relaciones_por_id={
+            100: [{
+                "relationType": "SEQUEL",
+                "node": {
+                    "id": 200, "idMal": 900200,
+                    "title": {
+                        "romaji":        "Mato Seihei no Slave 2",
+                        "english":       "Chained Soldier Season 2",
+                        "native":        None,
+                        "userPreferred": "Mato Seihei no Slave 2",
+                    },
+                    "synonyms": [], "format": "TV", "status": "FINISHED", "episodes": 12,
+                },
+            }],
+        },
+    )
+
+    worker, logs, resultado = _worker(tmp_path, "Chained Soldier S02E03.mkv")
+
+    llamadas = []
+
+    def _capturar(consulta, temporada, jikan_item=None, **kwargs):
+        llamadas.append((consulta, jikan_item))
+        return "slug-no-usado", "nombre-no-usado"
+
+    monkeypatch.setattr(worker, "_resolver_slug_con_picker", _capturar)
+
+    worker.run()
+
+    assert resultado.get("ok") is True
+
+    assert len(llamadas) == 1
+    consulta_recibida, jikan_item = llamadas[0]
+    # consulta_base (el titulo) SI se actualizo a la temporada 2 -- eso ya
+    # funciona hoy, via _aplicar_canon_multivariante.
+    assert consulta_recibida == "Mato Seihei no Slave 2"
+
+    assert jikan_item is not None
+    # Bug actual: jikan_item (derivado de picked_base) sigue siendo la
+    # temporada 1 (id=100), no la temporada 2 recien resuelta (id=200) --
+    # pese a que el titulo ya refleja la temporada 2 correctamente.
+    assert jikan_item["id"] == 100
+
     assert any("Jikan no disponible, usando AniList como respaldo" in l for l in logs)
     assert "• Resolviendo temporada de secuela…" in logs
     assert not any("🖱️" in l for l in logs)

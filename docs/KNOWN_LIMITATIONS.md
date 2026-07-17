@@ -245,3 +245,29 @@ incorrecta que probar. No cubierto todavía. Si se decide atacar, es una
 investigación aparte sobre cómo validar `picked_base` en sí mismo antes
 de que llegue a esta función (una capa anterior del pipeline, no
 relacionada con `_resolver_slug_con_picker`).
+
+## Releases que omiten el apóstrofe en el filename pueden hacer que Jikan/AniList no encuentren match
+
+Confirmado con un caso real: el filename
+`You.Cant.Be.In.a.Rom-Com.with.Your.Childhood.Friends.S01E07...mkv`
+genera la consulta `'You Cant Be In a Rom-Com with Your Childhood
+Friends'` (parsing correcto y fiel al filename — no hay ningún bug de
+`parsear_nombre_archivo()` acá). El título oficial real es *"You **Can't**
+Be In a Rom-Com with Your Childhood Friends!"* — el filename del grupo
+de release ya omite el apóstrofe (convención común para evitar
+caracteres especiales en nombres de archivo).
+
+Probado en vivo contra AniList: la consulta sin apóstrofe devuelve 0
+resultados; restaurando únicamente el apóstrofe ("Can't" en vez de
+"Cant", sin agregar el "!" final) encuentra el match exacto e
+inequívoco de inmediato. Es decir, la pérdida de un solo carácter en el
+filename alcanza para que la búsqueda de AniList no encuentre nada.
+
+No se considera un bug a corregir: el picker de AnimeThemes (15
+resultados, selección manual) ya cubre este caso como red de
+seguridad — el usuario resolvió el episodio sin problema. Una
+heurística de reinserción de apóstrofes sería frágil (requeriría un
+diccionario de contracciones inglesas, con beneficio angosto frente al
+riesgo de falsos positivos) y no se implementa. Esta nota es
+informativa, para quien audite el log más adelante y se pregunte por
+qué ese episodio puntual necesitó selección manual.

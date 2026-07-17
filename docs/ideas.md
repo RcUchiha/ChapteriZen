@@ -58,12 +58,8 @@ Estructura propuesta:
 
 ---
 
-4. Ver si lo del cache en AppData se borra después de tiempo o si se almacenaría.
-
 5. Cuando AnimeThemes no tenga un anime en su base de datos, hacer que ChapteriZen pueda tomar las canciones desde los videos que carguemos. Solo bastaría con indicar nosotros los tiempos en que inicia y termina el Opening o el Ending.
 Ya sea poniendo marcadores en una barra de desplazamiento de video. O también cargando un archivo de audio de la canción para hacer el match offset.
-
-6. Ver si las opciones de parámetros de coincidencia como submuestreo, porción del theme y umbral de puntuación siguen siendo útiles. Y si es posible, ver la manera de que no sean necesarias, ya que siendo realistas, es dificil que un usuario sepa para qué sirven o como utilizarlas. Además, también no creo que el usuario sepa para qué es la opción de "OP/ED exactos" y cuando marcarla o desmarcarla.
 
 7. Hacer que los placeholders sean en cursiva y del mismo color tenue. Porque noto que la cadena "Selecciona el archivo de video…" es más tenue que las otras. ¿Se puede hacer un tono intermedio entre ambos colores?
 

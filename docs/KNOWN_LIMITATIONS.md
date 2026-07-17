@@ -196,3 +196,52 @@ No cubierto todavía. Si se decide atacar, es una investigación aparte
 específica para `_THEMES_DIR` (política de limpieza por tamaño total o
 antigüedad de uso) — no relacionada con `get_api_cache()`, que ya
 resuelve esto por sí solo vía `diskcache`.
+
+## El atajo de resolución por ID externo de AnimeThemes no protege contra una identificación previa equivocada
+
+`_resolver_slug_con_picker` (`gui/resolver_worker.py`) intenta primero
+resolver el slug consultando AnimeThemes directo por recurso externo
+(`filter[has]=resources&filter[site]=MyAnimeList|Anilist&filter[external_id]=...`,
+vía `animethemes_buscar_por_id_externo`), usando el `mal_id`/`id` de
+AniList que Jikan o AniList ya resolvieron (`picked_base`, o
+`detectado_anilist_id` cuando viene de trace.moe con alta confianza).
+Si hay exactamente un resultado y su nombre no pierde tokens contra
+alguno de los títulos que Jikan/AniList ya conocen para ese mismo item
+(`_token_ok_contra_titulos_conocidos`, incluye título japonés/native),
+se acepta sin picker ni búsqueda de texto.
+
+**Esta validación protege un caso específico: que el recurso externo
+esté mal enlazado *dentro de AnimeThemes* (el `external_id` apunta a una
+página de anime distinta de la que Jikan/AniList conocen para ese
+mismo ID) — una inconsistencia de datos entre dos fuentes
+independientes.** Confirmado con simulación real sobre 204 archivos
+(`scripts/simular_atajo_por_id_animethemes.py`): la validación contra
+títulos conocidos de `picked_base` (en vez de contra el texto crudo del
+filename) rescata el 100% de los 95 falsos rechazos por diferencia de
+idioma que producía una primera versión más simple de la validación,
+sin ninguna regresión.
+
+**Lo que esta validación NO cubre**: si `picked_base` ya viene mal
+identificado desde una capa *anterior* del pipeline (el escenario que
+motivó pedir esta validación — ej. una identificación de baja confianza
+vía trace.moe que resolvió la serie equivocada, como el caso real de
+Ingoku Danchi documentado más abajo en la cuota de trace.moe), el
+nombre que devuelve AnimeThemes y los "títulos conocidos" usados para
+validar provienen del mismo `picked_base` erróneo — coinciden entre sí
+igual, sin que esta validación lo note. En ese escenario, el atajo por
+ID aceptaría con la misma confianza (falsa) que antes se hubiera visto
+en el propio `picked_base`, sin ningún picker de por medio que le diera
+al usuario la oportunidad de corregirlo manualmente — mientras que el
+camino de texto anterior, al menos, podía terminar en un picker si
+AnimeThemes no encontraba un match exacto.
+
+Confirmado empíricamente que esta brecha no tiene evidencia real
+todavía: en la simulación de 204 archivos, cero casos tenían un
+`picked_base` genuinamente mal identificado (todos los filenames eran
+legibles y se resolvieron bien por texto) — de hecho, Jikan estuvo
+caído durante toda esa corrida (ver `docs/TECH_DEBT.md`), así que los
+204 pasaron por AniList como respaldo sin ningún caso de identificación
+incorrecta que probar. No cubierto todavía. Si se decide atacar, es una
+investigación aparte sobre cómo validar `picked_base` en sí mismo antes
+de que llegue a esta función (una capa anterior del pipeline, no
+relacionada con `_resolver_slug_con_picker`).

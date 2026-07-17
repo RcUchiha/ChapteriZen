@@ -239,3 +239,24 @@ cambios) y por la actualización de dos tests preexistentes que
 resultaron afectados (`test_sin_temporada_con_tag_pegado_hevc10bit...`,
 mejora real no anticipada; `test_puramente_numerico_devuelve_titulo_numerico`,
 ahora protegido explícitamente en vez de "por accidente").
+
+## Jikan estuvo caído (504) durante toda la simulación de 204 archivos del atajo por ID de AnimeThemes
+
+Corriendo `scripts/simular_atajo_por_id_animethemes.py` sobre los 204
+archivos reales del corpus (ver `docs/KNOWN_LIMITATIONS.md`, entrada del
+atajo de resolución por ID externo), `GET https://api.jikan.moe/v4/anime`
+devolvió `504 BadResponseException` ("Jikan failed to connect to
+MyAnimeList") de forma persistente durante **toda** la corrida —
+confirmado revisando la caché de la corrida (`get_api_cache()`): 0 claves
+`jikan_search:*`, 44 claves `anilist_search:*`. Los 204 archivos
+resolvieron título vía el respaldo de AniList (`jikan_resolver_titulo`
+agotando reintentos → `anilist_buscar_titulo`), no vía Jikan directo.
+
+No es parte de este cambio (el atajo por ID funcionó igual usando el
+`picked_base` de AniList) y no se investigó si fue una caída puntual o
+un patrón — pero es una señal empírica a favor de priorizar el ítem
+pendiente de `docs/ideas.md` (#8/#9: fallback a AniList cuando Jikan
+devuelve vacío, hoy solo cubre el caso de error de Jikan, no el de
+respuesta vacía) más adelante: si Jikan cae con esta frecuencia en uso
+real, ese gap importa más de lo que parecía cuando se documentó
+originalmente.

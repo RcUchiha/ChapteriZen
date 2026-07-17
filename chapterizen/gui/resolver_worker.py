@@ -33,6 +33,7 @@ from ..anilist import (
 )
 from ..animethemes import (
     buscar_anime_en_animethemes,
+    animethemes_buscar_por_id_externo,
 )
 from ..parsing import (
     inferir_consulta_desde_nombre_archivo,
@@ -57,6 +58,65 @@ from ..jikan import (
 
 
 _MSG_SELECCION_CANCELADA = "Selección cancelada."
+
+
+def _ids_externos_de_picked_base(picked_base: Optional[dict]) -> List[Tuple[str, int]]:
+    """IDs externos candidatos para el atajo de AnimeThemes por recurso
+    (animethemes_buscar_por_id_externo), a partir del item ya resuelto
+    por Jikan o AniList. Si el item es de AniList (shape con 'id'/'idMal',
+    sin 'mal_id'), se intentan AMBOS sitios -- AnimeThemes puede tener
+    enlazado el recurso de MyAnimeList pero no el de AniList, o
+    viceversa; probar los dos maximiza la chance de evitar el camino de
+    texto sin gastar mas que un par de requests cacheados."""
+    if not picked_base:
+        return []
+    if "mal_id" in picked_base:
+        mal_id = picked_base.get("mal_id")
+        return [("MyAnimeList", mal_id)] if mal_id else []
+    ids: List[Tuple[str, int]] = []
+    if picked_base.get("id"):
+        ids.append(("Anilist", picked_base["id"]))
+    if picked_base.get("idMal"):
+        ids.append(("MyAnimeList", picked_base["idMal"]))
+    return ids
+
+
+def _titulos_conocidos_de_picked_base(picked_base: Optional[dict]) -> List[str]:
+    """Titulos que Jikan/AniList ya conocen para picked_base (incluye
+    title_japanese/native) -- shape-aware, mismo criterio que ya usa
+    _resolver_slug_con_picker para elegir entre jikan_titulos_desde_item
+    y anilist_titulos_desde_item."""
+    if not picked_base:
+        return []
+    if "mal_id" in picked_base:
+        return jikan_titulos_desde_item(picked_base)
+    return anilist_titulos_desde_item(picked_base)
+
+
+def _token_ok_contra_titulos_conocidos(nombre_at: str, titulos_conocidos: List[str]) -> bool:
+    """Validacion cruzada antes de aceptar el atajo por ID sin picker:
+    ¿el nombre que devuelve AnimeThemes para ese ID no pierde tokens de
+    AL MENOS uno de los titulos que Jikan/AniList ya conocen para el
+    mismo item (incluyendo el titulo japones/native)? Comparar contra
+    estos titulos en vez de contra el texto crudo del filename evita el
+    falso rechazo por diferencia de idioma (filename en ingles vs nombre
+    de AnimeThemes en romaji japones -- confirmado con datos reales:
+    scripts/simular_atajo_por_id_animethemes.py, ver docs/TECH_DEBT.md).
+
+    Importante -- lo que esta validacion NO cubre: si picked_base ya
+    esta mal identificado desde el origen (ej. una identificacion de
+    baja confianza via trace.moe que resolvio la serie equivocada), el
+    nombre de AnimeThemes y los titulos conocidos heredan el mismo error
+    y coinciden igual. Esta validacion protege contra un recurso externo
+    mal enlazado DENTRO de AnimeThemes (dato inconsistente entre dos
+    fuentes independientes), no contra una identificacion previa
+    equivocada en una capa anterior del pipeline -- eso es un problema
+    distinto (ver docs/TECH_DEBT.md)."""
+    return any(
+        _aceptar_canon_sin_perder_tokens(t, nombre_at)
+        for t in titulos_conocidos
+        if t
+    )
 
 
 def _variante_oficial_que_acepta(base: str, item: dict) -> Optional[Tuple[str, str]]:
@@ -387,9 +447,28 @@ class ResolverWorker(_BaseWorker):
                             # la búsqueda base, que puede ser False si Jikan quedó
                             # ambiguo): la propia navegación de la cadena de secuelas ya
                             # es una señal de identidad independiente de esa ambigüedad.
+                            consulta_base_antes = consulta_base
                             consulta_base = self._aplicar_canon_multivariante(
                                 consulta_base, picked_season, canon_season, True, log_rechazo=True
                             )
+                            # picked_base solo se actualiza a la temporada
+                            # resuelta si el canon fue ACEPTADO (consulta_base
+                            # cambió) -- _aplicar_canon_multivariante no
+                            # devuelve un booleano de aceptar/rechazar, así que
+                            # se infiere comparando antes/después. Si el canon
+                            # se rechazó (picked_season no comparte tokens con
+                            # el archivo -- ver
+                            # test_canon_de_secuela_anilist_rechazado_por_recorte_log_identico_a_jikan),
+                            # picked_base debe seguir siendo la temporada 1:
+                            # usar el ID de picked_season ahí sería reutilizar,
+                            # para el atajo de AnimeThemes, la misma entidad
+                            # que el pipeline acaba de descartar por no
+                            # relacionarse con el archivo. Antes de este fix,
+                            # picked_base nunca se reasignaba en absoluto acá
+                            # (a diferencia de Camino B, que sí lo hace) -- ver
+                            # test_camino_a_actualiza_picked_base_a_la_temporada_resuelta.
+                            if consulta_base != consulta_base_antes:
+                                picked_base = picked_season
                         except Exception as e:
                             self._log(f"  - ⚠️ Secuela falló: {e}. Usando canon base si está disponible.")
                             consulta_base = self._aplicar_canon_multivariante(
@@ -444,8 +523,29 @@ class ResolverWorker(_BaseWorker):
             # aportado (jikan_titulos_desde_item). En el camino normal (sin AniList) ese
             # respaldo sí existe.
             jikan_item = picked_base if not override else None
+
+            # IDs externos candidatos para el atajo de AnimeThemes por recurso
+            # (ver _resolver_slug_con_picker) -- se salta por completo si hay
+            # override (el usuario ya escribió una búsqueda manual, no
+            # corresponde reemplazarla por un ID que no pidió). En el camino
+            # de anilist_confirmado no hay picked_base (Jikan se omitió), pero
+            # sí detectado_anilist_id -- se usa ese, y anilist_titulo_por_id
+            # como único título conocido para la validación cruzada (no hay
+            # un item completo con sinónimos disponible en esta rama).
+            ids_externos: List[Tuple[str, int]] = []
+            titulos_conocidos: List[str] = []
+            if not override:
+                if anilist_confirmado and detectado_anilist_id is not None:
+                    ids_externos = [("Anilist", detectado_anilist_id)]
+                    titulo_por_id = anilist_titulo_por_id(detectado_anilist_id)
+                    titulos_conocidos = [titulo_por_id] if titulo_por_id else []
+                else:
+                    ids_externos      = _ids_externos_de_picked_base(picked_base)
+                    titulos_conocidos = _titulos_conocidos_de_picked_base(picked_base)
+
             slug, titulo_usado = self._resolver_slug_con_picker(
-                consulta_base, temporada, jikan_item=jikan_item
+                consulta_base, temporada, jikan_item=jikan_item,
+                ids_externos=ids_externos, titulos_conocidos=titulos_conocidos,
             )
             self.progress.emit(30)
             p.slug         = slug
@@ -647,19 +747,45 @@ class ResolverWorker(_BaseWorker):
 
     def _resolver_slug_con_picker(
         self,
-        consulta:    str,
-        temporada:   int,
-        jikan_item:  Optional[dict] = None,
+        consulta:          str,
+        temporada:         int,
+        jikan_item:        Optional[dict] = None,
+        ids_externos:      Optional[List[Tuple[str, int]]] = None,
+        titulos_conocidos: Optional[List[str]] = None,
     ) -> Tuple[str, str]:
         """
         Resuelve el slug de AnimeThemes para una consulta dada.
-        Si jikan_item está disponible, busca con todos sus títulos alternativos
-        antes de abrir el selector interactivo. jikan_item puede venir de Jikan
+
+        Camino principal (si ids_externos no está vacío): consulta directa
+        por recurso externo (MyAnimeList/AniList) via
+        animethemes_buscar_por_id_externo -- sin texto, sin ambigüedad, sin
+        picker. Solo se acepta si hay EXACTAMENTE un resultado y su nombre
+        pasa _token_ok_contra_titulos_conocidos contra titulos_conocidos
+        (ver esa función para la limitación: protege contra un recurso
+        externo mal enlazado en AnimeThemes, no contra picked_base ya mal
+        identificado desde una capa anterior). Si el atajo no da un match
+        válido para ningún ID candidato, cae exactamente al camino de texto
+        de siempre, sin cambios.
+
+        Camino de texto (respaldo, o si no hay ids_externos): si jikan_item
+        está disponible, busca con todos sus títulos alternativos antes de
+        abrir el selector interactivo. jikan_item puede venir de Jikan
         (shape con 'mal_id') o de AniList (fallback cuando Jikan agota
         reintentos, shape con 'id'/'idMal' y sin 'mal_id') -- cada shape usa
         su propia función de extracción de títulos porque tienen forma distinta
         (ver anilist_titulos_desde_item vs jikan_titulos_desde_item).
         """
+        for site, ext_id in (ids_externos or []):
+            resultados_id = animethemes_buscar_por_id_externo(site, ext_id)
+            if len(resultados_id) != 1:
+                continue
+            it        = resultados_id[0]
+            nombre_at = it.get("name") or ""
+            slug      = (it.get("slug") or "").strip()
+            if slug and _token_ok_contra_titulos_conocidos(nombre_at, titulos_conocidos or []):
+                self._log(f"• AnimeThemes: match directo por {site} ID {ext_id}…")
+                return slug, (it.get("name") or consulta).strip()
+
         self._log("• AnimeThemes (resolviendo slug)…")
 
         # Construir lista de consultas a intentar:

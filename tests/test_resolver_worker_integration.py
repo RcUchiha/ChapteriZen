@@ -52,6 +52,7 @@ from chapterizen.gui.resolver_worker import ResolverWorker, _variante_oficial_qu
 JIKAN_ANIME        = "https://api.jikan.moe/v4/anime"
 ANILIST_GRAPHQL    = "https://graphql.anilist.co"
 ANIMETHEMES_SEARCH = "https://api.animethemes.moe/search"
+ANIMETHEMES_ANIME  = "https://api.animethemes.moe/anime"
 
 
 def _worker(tmp_path, video_name, interactivo=True):
@@ -83,6 +84,11 @@ def test_happy_path_sin_picker_ni_fallback(tmp_path):
     activarse el respaldo de AniList/Jikan-via-picker."""
     respx.get(JIKAN_ANIME).mock(return_value=httpx.Response(200, json={"data": [
         {"mal_id": 1, "title": "Attack on Titan", "type": "TV", "episodes": 25, "score": 8.5},
+    ]}))
+    # Atajo por ID externo (mal_id=1): resultado unico -- se resuelve directo,
+    # sin pasar por el camino de texto en absoluto.
+    respx.get(ANIMETHEMES_ANIME).mock(return_value=httpx.Response(200, json={"anime": [
+        {"name": "Attack on Titan", "year": 2013, "season": None, "slug": "attack-on-titan"},
     ]}))
     respx.get(ANIMETHEMES_SEARCH).mock(return_value=httpx.Response(200, json={"search": {"anime": [
         {"name": "Attack on Titan", "year": 2013, "season": None, "slug": "attack-on-titan"},
@@ -121,7 +127,11 @@ def test_discrepancia_jikan_trace_moe_abre_picker_y_usa_seleccion(tmp_path, monk
     # Mock minimo de AnimeThemes: resultado unico no ambiguo para "Attack on
     # Titan" (titulo elegido en el picker de discrepancia), para que la
     # resolucion de slug -- que ahora corre siempre -- no abra un segundo
-    # picker.
+    # picker. El atajo por ID externo (mal_id=1, el candidato de Jikan
+    # elegido) tambien resuelve directo con el mismo resultado.
+    respx.get(ANIMETHEMES_ANIME).mock(return_value=httpx.Response(200, json={"anime": [
+        {"name": "Attack on Titan", "year": 2013, "season": None, "slug": "attack-on-titan"},
+    ]}))
     respx.get(ANIMETHEMES_SEARCH).mock(return_value=httpx.Response(200, json={"search": {"anime": [
         {"name": "Attack on Titan", "year": 2013, "season": None, "slug": "attack-on-titan"},
     ]}}))
@@ -227,6 +237,11 @@ def test_anilist_fallback_con_animethemes_ambiguo_usa_titulos_limpios(tmp_path):
             {"name": "Mato Seihei no Slave (2023)", "year": 2023, "season": None, "slug": "mato-seihei-no-slave-2023"},
         ]}})
     respx.get(ANIMETHEMES_SEARCH).mock(side_effect=_at_side_effect)
+    # El atajo por ID externo (id=12345, idMal=999999) no tiene recurso
+    # enlazado en este escenario sintetico -- el objetivo del test es la
+    # ambiguedad del camino de TEXTO, no el atajo. Sin este mock, el atajo
+    # intentaria una request real no mockeada.
+    respx.get(ANIMETHEMES_ANIME).mock(return_value=httpx.Response(200, json={"anime": []}))
 
     worker, logs, resultado = _worker(tmp_path, "Mato Seihei no Slave - 01.mkv")
     worker.need_pick.connect(lambda req: worker.entregar_pick(0))
@@ -333,6 +348,11 @@ def test_jikan_caido_anilist_navega_secuela_por_variante_ingles_pero_adopta_roma
             }],
         },
     )
+    # Atajo por ID externo (id=200, idMal=900200 -- ya la temporada 2 tras
+    # el fix de Camino A): resultado unico, se resuelve directo.
+    respx.get(ANIMETHEMES_ANIME).mock(return_value=httpx.Response(200, json={"anime": [
+        {"name": "Mato Seihei no Slave 2", "year": 2025, "season": None, "slug": "mato-seihei-no-slave-2"},
+    ]}))
     respx.get(ANIMETHEMES_SEARCH).mock(return_value=httpx.Response(200, json={"search": {"anime": [
         {"name": "Mato Seihei no Slave 2", "year": 2025, "season": None, "slug": "mato-seihei-no-slave-2"},
     ]}}))
@@ -347,28 +367,27 @@ def test_jikan_caido_anilist_navega_secuela_por_variante_ingles_pero_adopta_roma
 
 
 @respx.mock
-def test_camino_a_no_actualiza_picked_base_a_la_temporada_resuelta_CARACTERIZACION(tmp_path, monkeypatch):
-    """Caracterizacion del comportamiento ACTUAL (bug, no un requisito):
-    en Camino A, la navegacion de secuela guarda el resultado en
-    `picked_season` (variable local de run()) pero nunca reasigna
+def test_camino_a_actualiza_picked_base_a_la_temporada_resuelta(tmp_path, monkeypatch):
+    """Antes corregido (test de caracterizacion original, renombrado tras
+    el fix): en Camino A, la navegacion de secuela guardaba el resultado
+    en `picked_season` (variable local de run()) pero nunca reasignaba
     `picked_base` -- a diferencia de Camino B, que si lo hace
     (jikan_navegar_por_episodio/anilist_navegar_por_episodio reasignan
     picked_base explicitamente). Consecuencia real: `jikan_item`, que se
     arma como `picked_base if not override else None` y se pasa a
-    _resolver_slug_con_picker para los titulos alternativos de respaldo,
-    sigue siendo el item de la TEMPORADA 1 despues de que Camino A ya
-    resolvio y adopto el titulo de la temporada 2.
+    _resolver_slug_con_picker para los titulos alternativos de respaldo
+    (y, ahora, el atajo por ID externo de AnimeThemes), seguia siendo el
+    item de la TEMPORADA 1 despues de que Camino A ya habia resuelto y
+    adoptado el titulo de la temporada 2.
 
     Mismo escenario real que el test anterior (Chained Soldier S02 ->
     Mato Seihei no Slave, secuela real id=200) pero interceptando
-    _resolver_slug_con_picker para capturar el jikan_item con el que
-    seria llamado, en vez de dejar que se resuelva contra AnimeThemes.
+    _resolver_slug_con_picker para capturar el jikan_item con el que es
+    llamado, en vez de dejar que se resuelva contra AnimeThemes.
 
-    Este test debe quedar en verde ANTES del fix (documenta el bug tal
-    cual esta) y se actualiza cuando se agregue `picked_base =
-    picked_season` en Camino A (gui/resolver_worker.py) -- en ese punto,
-    jikan_item debe pasar a ser el de la temporada 2 (id=200), no el de
-    la temporada 1 (id=100)."""
+    Corregido agregando `picked_base = picked_season` en Camino A
+    (gui/resolver_worker.py) -- jikan_item ahora es el de la temporada 2
+    (id=200), no el de la temporada 1 (id=100)."""
     respx.get(JIKAN_ANIME).mock(return_value=httpx.Response(503, json={"error": "down"}))
     _mock_anilist_search_y_relations(
         media_busqueda=[_anilist_media(100, "Mato Seihei no Slave", episodes=12)],
@@ -410,10 +429,9 @@ def test_camino_a_no_actualiza_picked_base_a_la_temporada_resuelta_CARACTERIZACI
     assert consulta_recibida == "Mato Seihei no Slave 2"
 
     assert jikan_item is not None
-    # Bug actual: jikan_item (derivado de picked_base) sigue siendo la
-    # temporada 1 (id=100), no la temporada 2 recien resuelta (id=200) --
-    # pese a que el titulo ya refleja la temporada 2 correctamente.
-    assert jikan_item["id"] == 100
+    # jikan_item (derivado de picked_base) ahora es la temporada 2 recien
+    # resuelta (id=200), no la temporada 1 original (id=100).
+    assert jikan_item["id"] == 200
 
     assert any("Jikan no disponible, usando AniList como respaldo" in l for l in logs)
     assert "• Resolviendo temporada de secuela…" in logs
@@ -470,6 +488,20 @@ def test_canon_de_secuela_anilist_rechazado_por_recorte_log_identico_a_jikan(tmp
     # siendo el base), para que la resolucion de slug -- que ahora corre
     # siempre -- no abra picker (este test no tiene need_pick cableado, asi
     # que un picker real quedaria esperando entregar_pick() para siempre).
+    # Deliberadamente el atajo por ID SOLO responde para el ID de la
+    # temporada 1 (id=100/idMal=900100), no para el de la temporada 2
+    # rechazada (id=999/idMal=900999, "Completely Different Show") -- si el
+    # fix de picked_base tuviera una regresion y siguiera usando la entidad
+    # rechazada, este side_effect devolveria vacio para esos IDs y el test
+    # fallaria (la resolucion caeria al picker, que no esta cableado aqui).
+    def _at_id_side_effect(request):
+        ext_id = request.url.params.get("filter[external_id]")
+        if ext_id in ("100", "900100"):
+            return httpx.Response(200, json={"anime": [
+                {"name": "Attack on Titan", "year": 2013, "season": None, "slug": "attack-on-titan"},
+            ]})
+        return httpx.Response(200, json={"anime": []})
+    respx.get(ANIMETHEMES_ANIME).mock(side_effect=_at_id_side_effect)
     respx.get(ANIMETHEMES_SEARCH).mock(return_value=httpx.Response(200, json={"search": {"anime": [
         {"name": "Attack on Titan", "year": 2013, "season": None, "slug": "attack-on-titan"},
     ]}}))
@@ -533,7 +565,11 @@ def test_camino_a_navega_secuela_pese_a_jikan_ambiguo(tmp_path):
     # Mock minimo de AnimeThemes: resultado unico no ambiguo para "Attack on
     # Titan Season 2" (canon de secuela aceptado), para que la resolucion de
     # slug -- que ahora corre siempre -- no abra picker (este test tampoco
-    # tiene need_pick cableado).
+    # tiene need_pick cableado). El atajo por ID externo (mal_id=600, ya la
+    # temporada 2 tras el fix de Camino A) tambien resuelve directo.
+    respx.get(ANIMETHEMES_ANIME).mock(return_value=httpx.Response(200, json={"anime": [
+        {"name": "Attack on Titan Season 2", "year": 2017, "season": None, "slug": "attack-on-titan-season-2"},
+    ]}))
     respx.get(ANIMETHEMES_SEARCH).mock(return_value=httpx.Response(200, json={"search": {"anime": [
         {"name": "Attack on Titan Season 2", "year": 2017, "season": None, "slug": "attack-on-titan-season-2"},
     ]}}))

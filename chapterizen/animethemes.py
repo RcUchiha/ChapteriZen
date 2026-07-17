@@ -37,6 +37,31 @@ def buscar_anime_en_animethemes(nombre_busqueda: str) -> List[dict]:
     get_api_cache().set(clave, result, expire=_TTL_API_DAYS * 86400)
     return result
 
+@_reintento_http
+def animethemes_buscar_por_id_externo(site: str, external_id: int) -> List[dict]:
+    """Busca el anime en AnimeThemes por ID externo (MyAnimeList o
+    AniList) via filter[has]=resources -- unico y no ambiguo cuando
+    AnimeThemes tiene ese recurso enlazado, sin depender de texto ni
+    picker. filter[has]=resources es obligatorio, no decorativo: sin el,
+    AnimeThemes ignora filter[site]/filter[external_id] en silencio y
+    devuelve la lista completa sin filtrar (confirmado en vivo, no
+    asumido). Devuelve la lista cruda (0, 1, o -- en teoria -- mas de un
+    resultado); el caller decide que hacer con cada caso, igual que ya
+    hace con buscar_anime_en_animethemes."""
+    clave  = f"at_by_id:{site}:{external_id}"
+    cached = get_api_cache().get(clave)
+    if cached is not None:
+        return cached
+    r = _http.get(ANIMETHEMES_ANIME, params={
+        "filter[has]": "resources",
+        "filter[site]": site,
+        "filter[external_id]": str(external_id),
+    })
+    r.raise_for_status()
+    result = (r.json() or {}).get("anime") or []
+    get_api_cache().set(clave, result, expire=_TTL_API_DAYS * 86400)
+    return result
+
 def obtener_anime_de_animethemes(slug: str) -> dict:
     clave  = f"at_anime:{slug}"
     cached = get_api_cache().get(clave)

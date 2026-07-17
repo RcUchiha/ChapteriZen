@@ -12,6 +12,7 @@ from chapterizen.gui.resolver_worker import ResolverWorker
 JIKAN_ANIME        = "https://api.jikan.moe/v4/anime"
 ANILIST_GRAPHQL    = "https://graphql.anilist.co"
 ANIMETHEMES_SEARCH = "https://api.animethemes.moe/search"
+ANIMETHEMES_ANIME  = "https://api.animethemes.moe/anime"
 
 
 def _anilist_media(anilist_id, romaji, episodes=12):
@@ -68,7 +69,11 @@ def test_jikan_agota_reintentos_usa_anilist_como_respaldo(tmp_path):
     # Mock minimo de AnimeThemes: resultado unico no ambiguo para que la
     # resolucion de slug (que ahora corre siempre, ya no hay usar_exacto que
     # la salte) no abra picker ni dependa de un respaldo via Jikan (que en
-    # este test esta caido a proposito).
+    # este test esta caido a proposito). El atajo por ID externo (id=999,
+    # idMal=900999) tambien resuelve directo con el mismo resultado.
+    respx.get(ANIMETHEMES_ANIME).mock(return_value=httpx.Response(200, json={"anime": [
+        {"name": "Test Anime", "year": 2024, "season": None, "slug": "test-anime"},
+    ]}))
     respx.get(ANIMETHEMES_SEARCH).mock(return_value=httpx.Response(200, json={"search": {"anime": [
         {"name": "Test Anime", "year": 2024, "season": None, "slug": "test-anime"},
     ]}}))
@@ -185,7 +190,12 @@ def test_jikan_confiable_false_no_dispara_fallback_de_anilist(tmp_path):
     # Mock minimo de AnimeThemes (mismo motivo que en el test anterior):
     # resultado unico no ambiguo para el titulo base del archivo (el canon de
     # Jikan se rechaza por no confiable, asi que la consulta sigue siendo
-    # "Test Anime"), para que la resolucion de slug no abra picker.
+    # "Test Anime"), para que la resolucion de slug no abra picker. El atajo
+    # por ID externo (mal_id=1 o 2, cualquiera que _jikan_rank haya elegido)
+    # tambien resuelve directo con el mismo resultado.
+    respx.get(ANIMETHEMES_ANIME).mock(return_value=httpx.Response(200, json={"anime": [
+        {"name": "Test Anime", "year": 2024, "season": None, "slug": "test-anime"},
+    ]}))
     respx.get(ANIMETHEMES_SEARCH).mock(return_value=httpx.Response(200, json={"search": {"anime": [
         {"name": "Test Anime", "year": 2024, "season": None, "slug": "test-anime"},
     ]}}))

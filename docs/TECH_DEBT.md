@@ -27,27 +27,42 @@ mantenimiento) para eliminar `chapterizen.py` cuando corresponda. No se
 toca ahora — requiere confirmar antes que nada externo lo importe como
 módulo.
 
-## El sink de loguru se configura al importar `config.py`, sin distinguir GUI de tests/scripts
+## [CORREGIDO] El sink de loguru se configuraba al importar `config.py`, sin distinguir GUI de tests/scripts
 
-`config.py` llama a `logger.remove()` + `logger.add(_LOG_DIR / "chapterizen_{time:YYYY-MM-DD}.log", ...)`
-directamente en el cuerpo del módulo (línea ~66), así que se ejecuta apenas
-alguien hace `import chapterizen` (o cualquier import que dispare
-`chapterizen/__init__.py`) — no solo cuando arranca la GUI real. Confirmado:
-correr `pytest` escribe entradas DEBUG reales (incluyendo datos sintéticos
+`config.py` llamaba a `logger.remove()` + `logger.add(_LOG_DIR / "chapterizen_{time:YYYY-MM-DD}.log", ...)`
+directamente en el cuerpo del módulo, así que se ejecutaba apenas alguien
+hacía `import chapterizen` (o cualquier import que disparara
+`chapterizen/__init__.py`) — no solo cuando arrancaba la GUI real. Confirmado:
+correr `pytest` escribía entradas DEBUG reales (incluyendo datos sintéticos
 de fixtures, ej. títulos de prueba como "Attack on Titan"/"Shingeki no
 Kyojin") en el mismo archivo rotativo de producción que usa la GUI
 (`%LOCALAPPDATA%\ChapteriZen\ChapteriZen\Logs\` en Windows). Cualquier
-script standalone que importe el paquete tiene el mismo problema salvo que
-reemplace el sink explícitamente después del import (ver
-`scripts/calibrar_trace_moe.py`, que hace justamente eso).
+script standalone que importaba el paquete tenía el mismo problema salvo
+que reemplazara el sink explícitamente después del import (ver
+`scripts/calibrar_trace_moe.py` y `scripts/simular_decision_resolver.py`,
+que hacían justamente eso).
 
 Mismo patrón que el bug de aislamiento de `_API_CACHE` (ver commit
 `33e5611`, `get_api_cache()`), aplicado a logging en vez de caché: un
 efecto secundario de proceso configurado incondicionalmente al importar un
-módulo, sin diferenciar quién importa. No se toca ahora — requiere decidir
-si `config.py` debe seguir configurando el sink en el import (y ofrecer un
-modo de override explícito) o si esa responsabilidad debería moverse a
-`__main__.py` (solo se configuraría al arrancar la GUI real).
+módulo, sin diferenciar quién importa.
+
+**Corregido:** la configuración del sink se movió a una función explícita,
+`configurar_logging_produccion()` (`chapterizen/config.py`), que ya no se
+ejecuta en el cuerpo del módulo — solo la llama `__main__.main()` al
+arrancar la GUI real. Importar `chapterizen.config` (tests, scripts,
+exploración en REPL) ya no tiene ningún efecto secundario sobre logging;
+sin sink configurado explícitamente, loguru simplemente usa su sink de
+stderr por defecto. Los 2 scripts existentes que ya se redirigían
+manualmente después del import (`calibrar_trace_moe.py`,
+`simular_decision_resolver.py`) siguen funcionando sin cambios de
+comportamiento — sus comentarios se actualizaron para no seguir
+describiendo un bug que ya no existe.
+
+Cubierto por `tests/test_config_logging.py`: confirma que importar
+`chapterizen.config` no deja ningún sink de archivo activo, y que
+`configurar_logging_produccion()` sí lo agrega cuando se llama
+explícitamente.
 
 ## `_TRACE_UMBRAL_CONFIANZA_ALTA` (punto 5 del análisis de resolver_worker.py) evaluado y NO implementado
 

@@ -26,14 +26,14 @@ carpeta grande (Ctrl+C, cierre de terminal, un 429 persistente que agota
 reintentos en TODOS los frames de un video), lo ya procesado antes del
 corte queda guardado en el CSV, no solo en el scrollback de la terminal.
 
-Nota sobre logging (ver entrada nueva en docs/TECH_DEBT.md): importar
-chapterizen.config configura un sink de loguru hacia el log real de
-produccion (chapterizen_YYYY-MM-DD.log) apenas se importa el paquete,
-sin distinguir GUI de un script de una vez. Este script reemplaza ese
-sink por uno propio (calibracion_trace_moe.log, junto a este archivo)
-INMEDIATAMENTE despues de ese import y ANTES de llamar a cualquier otra
-funcion de chapterizen -- ninguna linea de esta corrida termina en el
-archivo de produccion.
+Nota sobre logging: config.py ya no configura ningun sink de loguru al
+importarse -- eso quedo movido a configurar_logging_produccion()
+(chapterizen/config.py), que solo llama __main__.main() al arrancar la
+GUI real (ver docs/TECH_DEBT.md). Este script nunca llama a esa funcion:
+agrega su propio sink (calibracion_trace_moe.log, junto a este archivo)
+antes de importar cualquier otro modulo de chapterizen, asi que ninguna
+linea de esta corrida termina en el archivo de produccion ni depende de
+que loguru tenga algo configurado de antemano.
 """
 import csv
 import sys
@@ -50,7 +50,7 @@ from chapterizen.config import VIDEO_EXTS  # dispara chapterizen/__init__.py -> 
 from loguru import logger
 
 _LOG_CALIBRACION = Path(__file__).with_name("calibracion_trace_moe.log")
-logger.remove()  # saca el sink de produccion que config.py acaba de agregar
+logger.remove()  # por si loguru trae su sink de stderr por defecto
 logger.add(_LOG_CALIBRACION, level="DEBUG", encoding="utf-8")
 
 # Recien ahora se importa el resto -- estos modulos no agregan sinks

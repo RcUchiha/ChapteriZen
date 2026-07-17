@@ -24,7 +24,7 @@ from PyQt6.QtWidgets import (
     QProgressBar,
 )
 
-from .config import VIDEO_EXTS
+from .config import VIDEO_EXTS, configurar_logging_produccion
 from .modelos import ParametrosTrabajo, PickRequest
 from .gui.pickers import DialogoSelectorTabla
 from .gui.resolver_worker import ResolverWorker
@@ -398,6 +398,7 @@ class VentanaPrincipal(QMainWindow):
 
 def main():
     import sys
+    configurar_logging_produccion()
     app = QApplication(sys.argv)
     app.setStyle("Fusion")
     w = VentanaPrincipal()

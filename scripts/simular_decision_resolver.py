@@ -43,11 +43,11 @@ from chapterizen.config import VIDEO_EXTS  # dispara chapterizen/__init__.py -> 
 
 from loguru import logger
 
-# Mismo cuidado que calibrar_trace_moe.py: importar chapterizen configura
-# un sink de loguru hacia el log real de produccion apenas se importa el
-# paquete (ver docs/TECH_DEBT.md). Este script no llama a ninguna funcion
-# que loguee nada sensible, pero se redirige de todas formas por si
-# parsear_nombre_archivo emite logger.debug(...) con detalle de parsing.
+# config.py ya no configura ningun sink al importarse (eso quedo movido a
+# configurar_logging_produccion(), que solo llama __main__.main() -- ver
+# docs/TECH_DEBT.md). Este script no llama a esa funcion: se redirige a
+# su propio log de todas formas por si parsear_nombre_archivo emite
+# logger.debug(...) con detalle de parsing.
 _LOG_SIMULACION = Path(__file__).with_name("simulacion_decision_resolver.log")
 logger.remove()
 logger.add(_LOG_SIMULACION, level="DEBUG", encoding="utf-8")

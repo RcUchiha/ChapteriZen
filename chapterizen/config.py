@@ -61,17 +61,24 @@ def get_api_cache() -> Cache:
 _LOG_DIR = Path(user_log_dir("ChapteriZen"))
 _LOG_DIR.mkdir(parents=True, exist_ok=True)
 
-# Quitar el sink de stderr por defecto y añadir solo el archivo rotativo.
-# La GUI muestra los logs a través de las señales Qt — no necesitamos stderr.
-logger.remove()
-logger.add(
-    _LOG_DIR / "chapterizen_{time:YYYY-MM-DD}.log",
-    rotation="1 day",       # un archivo por día
-    retention="14 days",    # conservar 2 semanas
-    encoding="utf-8",
-    level="DEBUG",
-    format="{time:HH:mm:ss} | {level:<8} | {message}",
-)
+def configurar_logging_produccion():
+    """Quita el sink de stderr por defecto de loguru y añade el archivo
+    rotativo de producción. Debe llamarse una sola vez, explícitamente,
+    desde __main__.main() al arrancar la GUI real -- nunca desde el
+    cuerpo de este módulo, para que un simple `import chapterizen.config`
+    (tests, scripts standalone) no configure logging a disco sin que
+    quien importa lo haya pedido (ver docs/TECH_DEBT.md, mismo patrón que
+    get_api_cache() aplicado a logging en vez de caché). La GUI muestra
+    los logs a través de las señales Qt — no necesitamos stderr."""
+    logger.remove()
+    logger.add(
+        _LOG_DIR / "chapterizen_{time:YYYY-MM-DD}.log",
+        rotation="1 day",       # un archivo por día
+        retention="14 days",    # conservar 2 semanas
+        encoding="utf-8",
+        level="DEBUG",
+        format="{time:HH:mm:ss} | {level:<8} | {message}",
+    )
 
 # ─────────────────────────────────────────────
 #  REINTENTOS (tenacity)

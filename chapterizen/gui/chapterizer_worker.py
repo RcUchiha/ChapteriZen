@@ -45,7 +45,7 @@ from ..audio_matching import (
     formatear_tiempo,
     _tiempo_sin_ms,
 )
-from ..chapters_xml import guardar_chapters, chapters_heuristicos
+from ..chapters_xml import guardar_chapters
 from ..naming import construir_ruta_salida
 from .resolver_worker import _BaseWorker
 
@@ -81,17 +81,6 @@ class ChapterizerWorker(_BaseWorker):
                 titulo_anime=titulo_usado,
                 episodio=episodio,
             )
-            if not p.usar_exacto:
-                chapters = chapters_heuristicos(dur)
-                guardar_chapters(ruta_salida, chapters)
-                self.progress.emit(100)
-                self._log("• Chapters:")
-                for _t, _nom in sorted(chapters, key=lambda x: x[0]):
-                    self._log(f"    [{_tiempo_sin_ms(_t)}]  {_nom}")
-                self._log(f"✅ Completado (heurístico): {ruta_salida}")
-                self.terminado.emit(ruta_salida)
-                return
-
             if not slug:
                 raise RuntimeError(
                     "Slug vacío. La serie no fue resuelta en el hilo principal "
@@ -140,8 +129,8 @@ class ChapterizerWorker(_BaseWorker):
 
             if not wavs_temas:
                 raise RuntimeError(
-                    "No encontré WAVs de OP/ED en caché. "
-                    "(¿AnimeThemes no trae audios?)"
+                    f"AnimeThemes no tiene ningún OP/ED catalogado para '{slug}'"
+                    " — no se puede generar el XML sin matching exacto."
                 )
 
             tiene_op = any(t.nombre.upper().startswith("OP") for t in wavs_temas)
@@ -247,56 +236,58 @@ class ChapterizerWorker(_BaseWorker):
             POST_ED = "Conclusión"
 
             if not mejor_op and not mejor_ed:
-                self._log("⚠️ No pude coincidir con OP/ED. Usando modo heurístico.")
-                chapters = chapters_heuristicos(dur)
-            else:
-                marcas_tiempo: List[float] = []
-                if mejor_op:
-                    marcas_tiempo.extend([mejor_op.inicio, mejor_op.fin])
-                if mejor_ed:
-                    marcas_tiempo.extend([mejor_ed.inicio, mejor_ed.fin])
-                marcas_tiempo = sorted(marcas_tiempo)
+                raise RuntimeError(
+                    "No se encontró coincidencia de audio suficiente para OP ni ED"
+                    f" (umbral={p.puntuacion_minima}) — no se generará XML."
+                )
 
-                def cerca_del_inicio(t: float) -> bool: return t < 4.0
-                def cerca_del_final(t: float)  -> bool: return t > dur - 4.0
+            marcas_tiempo: List[float] = []
+            if mejor_op:
+                marcas_tiempo.extend([mejor_op.inicio, mejor_op.fin])
+            if mejor_ed:
+                marcas_tiempo.extend([mejor_ed.inicio, mejor_ed.fin])
+            marcas_tiempo = sorted(marcas_tiempo)
 
-                ajusta_inicio = cerca_del_inicio(marcas_tiempo[0]) if marcas_tiempo else False
-                ajusta_final  = cerca_del_final(marcas_tiempo[-1])  if marcas_tiempo else False
-                solo_ed       = bool(marcas_tiempo and marcas_tiempo[0] > (dur / 2.0))
+            def cerca_del_inicio(t: float) -> bool: return t < 4.0
+            def cerca_del_final(t: float)  -> bool: return t > dur - 4.0
 
-                titulo_op = (
-                    mapa_titulos_temas.get(mejor_op.nombre_tema)
-                    or f"Opening ({mejor_op.nombre_tema})"
-                ) if mejor_op else "Opening"
+            ajusta_inicio = cerca_del_inicio(marcas_tiempo[0]) if marcas_tiempo else False
+            ajusta_final  = cerca_del_final(marcas_tiempo[-1])  if marcas_tiempo else False
+            solo_ed       = bool(marcas_tiempo and marcas_tiempo[0] > (dur / 2.0))
 
-                titulo_ed = (
-                    mapa_titulos_temas.get(mejor_ed.nombre_tema)
-                    or f"Ending ({mejor_ed.nombre_tema})"
-                ) if mejor_ed else "Ending"
+            titulo_op = (
+                mapa_titulos_temas.get(mejor_op.nombre_tema)
+                or f"Opening ({mejor_op.nombre_tema})"
+            ) if mejor_op else "Opening"
 
-                chapters: List[Tuple[float, str]] = [(0.0, PRE_OP)]
+            titulo_ed = (
+                mapa_titulos_temas.get(mejor_ed.nombre_tema)
+                or f"Ending ({mejor_ed.nombre_tema})"
+            ) if mejor_ed else "Ending"
 
-                if marcas_tiempo:
-                    if ajusta_inicio and not solo_ed:
-                        chapters[0] = (0.0, titulo_op)
-                        chapters.append((marcas_tiempo[1], EPISODE))
-                        if len(marcas_tiempo) == 4:
-                            chapters.append((marcas_tiempo[2], titulo_ed))
-                            if not ajusta_final:
-                                chapters.append((marcas_tiempo[3], POST_ED))
-                    elif solo_ed:
-                        chapters[0] = (0.0, EPISODE)
-                        chapters.append((marcas_tiempo[0], titulo_ed))
-                        if not ajusta_final and len(marcas_tiempo) >= 2:
-                            chapters.append((marcas_tiempo[1], POST_ED))
-                    else:
-                        chapters[0] = (0.0, PRE_OP)
-                        chapters.append((marcas_tiempo[0], titulo_op))
-                        chapters.append((marcas_tiempo[1], EPISODE))
-                        if len(marcas_tiempo) == 4:
-                            chapters.append((marcas_tiempo[2], titulo_ed))
-                            if not ajusta_final:
-                                chapters.append((marcas_tiempo[3], POST_ED))
+            chapters: List[Tuple[float, str]] = [(0.0, PRE_OP)]
+
+            if marcas_tiempo:
+                if ajusta_inicio and not solo_ed:
+                    chapters[0] = (0.0, titulo_op)
+                    chapters.append((marcas_tiempo[1], EPISODE))
+                    if len(marcas_tiempo) == 4:
+                        chapters.append((marcas_tiempo[2], titulo_ed))
+                        if not ajusta_final:
+                            chapters.append((marcas_tiempo[3], POST_ED))
+                elif solo_ed:
+                    chapters[0] = (0.0, EPISODE)
+                    chapters.append((marcas_tiempo[0], titulo_ed))
+                    if not ajusta_final and len(marcas_tiempo) >= 2:
+                        chapters.append((marcas_tiempo[1], POST_ED))
+                else:
+                    chapters[0] = (0.0, PRE_OP)
+                    chapters.append((marcas_tiempo[0], titulo_op))
+                    chapters.append((marcas_tiempo[1], EPISODE))
+                    if len(marcas_tiempo) == 4:
+                        chapters.append((marcas_tiempo[2], titulo_ed))
+                        if not ajusta_final:
+                            chapters.append((marcas_tiempo[3], POST_ED))
 
             guardar_chapters(ruta_salida, chapters)
             self.progress.emit(100)

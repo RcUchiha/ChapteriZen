@@ -15,11 +15,12 @@ _pedir_pick en gui/workers.py):
   __main__.py cuando el usuario elige en el dialogo real).
 
   Los 3 tests existentes en test_resolver_worker_anilist_fallback.py NUNCA
-  llegan a ejecutar _wait_pick(): usan usar_exacto=False (evita por
-  completo el picker de AnimeThemes, que solo se alcanza si usar_exacto es
-  True) y construyen la respuesta de Jikan para que no cruce el umbral de
-  cross-verificacion (ts1_base >= 0.85) que dispara el picker de
-  discrepancia. O sea, esos 3 tests no tienen un mecanismo para resolver
+  llegan a ejecutar _wait_pick(): construyen la respuesta de Jikan para que
+  no cruce el umbral de cross-verificacion (ts1_base >= 0.85) que dispara
+  el picker de discrepancia, y mockean AnimeThemes con un resultado unico
+  no ambiguo para que la resolucion de slug (que corre siempre desde que
+  se elimino el checkbox "OP/ED exactos" y el campo usar_exacto) tampoco
+  abra picker. O sea, esos 3 tests no tienen un mecanismo para resolver
   picks -- simplemente nunca abren un picker.
 
   Para los escenarios nuevos que SI necesitan resolver un picker real, el
@@ -53,14 +54,13 @@ ANILIST_GRAPHQL    = "https://graphql.anilist.co"
 ANIMETHEMES_SEARCH = "https://api.animethemes.moe/search"
 
 
-def _worker(tmp_path, video_name, usar_exacto, interactivo=True):
+def _worker(tmp_path, video_name, interactivo=True):
     video = tmp_path / video_name
     video.write_bytes(b"")
     params = ParametrosTrabajo(
         video=str(video),
         carpeta_salida="",
         crear_subcarpeta=False,
-        usar_exacto=usar_exacto,
         search_override="",
     )
     worker = ResolverWorker(None, params, interactivo=interactivo)
@@ -71,6 +71,7 @@ def _worker(tmp_path, video_name, usar_exacto, interactivo=True):
     resultado = {}
     worker.resolved.connect(lambda p: resultado.update(ok=True, params=p))
     worker.failed.connect(lambda msg: resultado.update(ok=False, error=msg))
+    worker.cancelado.connect(lambda: resultado.update(ok=False, cancelado=True))
 
     return worker, logs, resultado
 
@@ -87,7 +88,7 @@ def test_happy_path_sin_picker_ni_fallback(tmp_path):
         {"name": "Attack on Titan", "year": 2013, "season": None, "slug": "attack-on-titan"},
     ]}}))
 
-    worker, logs, resultado = _worker(tmp_path, "Attack on Titan - 05.mkv", usar_exacto=True)
+    worker, logs, resultado = _worker(tmp_path, "Attack on Titan - 05.mkv")
     worker.run()
 
     assert resultado.get("ok") is True
@@ -117,8 +118,15 @@ def test_discrepancia_jikan_trace_moe_abre_picker_y_usa_seleccion(tmp_path, monk
     respx.post(ANILIST_GRAPHQL).mock(return_value=httpx.Response(200, json={
         "data": {"Media": {"title": {"romaji": "Shingeki no Kyojin"}}}
     }))
+    # Mock minimo de AnimeThemes: resultado unico no ambiguo para "Attack on
+    # Titan" (titulo elegido en el picker de discrepancia), para que la
+    # resolucion de slug -- que ahora corre siempre -- no abra un segundo
+    # picker.
+    respx.get(ANIMETHEMES_SEARCH).mock(return_value=httpx.Response(200, json={"search": {"anime": [
+        {"name": "Attack on Titan", "year": 2013, "season": None, "slug": "attack-on-titan"},
+    ]}}))
 
-    worker, logs, resultado = _worker(tmp_path, "Attack on Titan - 05.mkv", usar_exacto=False)
+    worker, logs, resultado = _worker(tmp_path, "Attack on Titan - 05.mkv")
 
     # _identificar_con_trace_moe hace extraccion real de fotogramas via ffmpeg --
     # fuera de alcance para esta suite orientada a red (HTTP). Se fija el
@@ -162,7 +170,7 @@ def test_discrepancia_cancelada_propaga_failed_con_mensaje_claro(tmp_path, monke
         "data": {"Media": {"title": {"romaji": "Shingeki no Kyojin"}}}
     }))
 
-    worker, logs, resultado = _worker(tmp_path, "Attack on Titan - 05.mkv", usar_exacto=False)
+    worker, logs, resultado = _worker(tmp_path, "Attack on Titan - 05.mkv")
     monkeypatch.setattr(
         worker, "_identificar_con_trace_moe",
         lambda video: AnimeDetectado(titulo="no-usado-en-este-call-site", anilist_id=999, episodio=5, similitud=0.93),
@@ -171,8 +179,12 @@ def test_discrepancia_cancelada_propaga_failed_con_mensaje_claro(tmp_path, monke
 
     worker.run()
 
+    # La cancelacion ya no viaja por failed -- tiene su propia senal
+    # cancelado(), separada para que la UI no muestre un popup de error
+    # ante una accion intencional del usuario (ver __main__.py._on_cancelado).
     assert resultado.get("ok") is False
-    assert resultado.get("error") == "Selección cancelada."
+    assert resultado.get("cancelado") is True
+    assert "error" not in resultado
 
     assert "🖱️ Picker abierto: Verificación de título — Jikan vs trace.moe (2 opciones)" in logs
     assert "🖱️ Picker cancelado por el usuario." in logs
@@ -216,7 +228,7 @@ def test_anilist_fallback_con_animethemes_ambiguo_usa_titulos_limpios(tmp_path):
         ]}})
     respx.get(ANIMETHEMES_SEARCH).mock(side_effect=_at_side_effect)
 
-    worker, logs, resultado = _worker(tmp_path, "Mato Seihei no Slave - 01.mkv", usar_exacto=True)
+    worker, logs, resultado = _worker(tmp_path, "Mato Seihei no Slave - 01.mkv")
     worker.need_pick.connect(lambda req: worker.entregar_pick(0))
 
     worker.run()
@@ -246,7 +258,7 @@ def test_jikan_y_anilist_agotan_reintentos_propaga_failed(tmp_path):
     respx.get(JIKAN_ANIME).mock(return_value=httpx.Response(503, json={"error": "down"}))
     respx.post(ANILIST_GRAPHQL).mock(return_value=httpx.Response(503, json={"error": "also down"}))
 
-    worker, logs, resultado = _worker(tmp_path, "Attack on Titan - 05.mkv", usar_exacto=False)
+    worker, logs, resultado = _worker(tmp_path, "Attack on Titan - 05.mkv")
     worker.run()
 
     assert resultado.get("ok") is False
@@ -325,7 +337,7 @@ def test_jikan_caido_anilist_navega_secuela_por_variante_ingles_pero_adopta_roma
         {"name": "Mato Seihei no Slave 2", "year": 2025, "season": None, "slug": "mato-seihei-no-slave-2"},
     ]}}))
 
-    worker, logs, resultado = _worker(tmp_path, "Chained Soldier S02E03.mkv", usar_exacto=True)
+    worker, logs, resultado = _worker(tmp_path, "Chained Soldier S02E03.mkv")
     worker.run()
 
     assert resultado.get("ok") is True
@@ -383,8 +395,16 @@ def test_canon_de_secuela_anilist_rechazado_por_recorte_log_identico_a_jikan(tmp
             100: [{"relationType": "SEQUEL", "node": node_sin_relacion}],
         },
     )
+    # Mock minimo de AnimeThemes: resultado unico no ambiguo para "Attack on
+    # Titan" (el canon se rechaza por recorte, asi que el titulo usado sigue
+    # siendo el base), para que la resolucion de slug -- que ahora corre
+    # siempre -- no abra picker (este test no tiene need_pick cableado, asi
+    # que un picker real quedaria esperando entregar_pick() para siempre).
+    respx.get(ANIMETHEMES_SEARCH).mock(return_value=httpx.Response(200, json={"search": {"anime": [
+        {"name": "Attack on Titan", "year": 2013, "season": None, "slug": "attack-on-titan"},
+    ]}}))
 
-    worker, logs, resultado = _worker(tmp_path, "Attack on Titan S02E03.mkv", usar_exacto=False)
+    worker, logs, resultado = _worker(tmp_path, "Attack on Titan S02E03.mkv")
     worker.run()
 
     assert resultado.get("ok") is True
@@ -440,8 +460,15 @@ def test_camino_a_navega_secuela_pese_a_jikan_ambiguo(tmp_path):
     respx.get(f"{JIKAN_ANIME}/600").mock(return_value=httpx.Response(200, json={"data": {
         "mal_id": 600, "title": "Attack on Titan Season 2", "episodes": 12,
     }}))
+    # Mock minimo de AnimeThemes: resultado unico no ambiguo para "Attack on
+    # Titan Season 2" (canon de secuela aceptado), para que la resolucion de
+    # slug -- que ahora corre siempre -- no abra picker (este test tampoco
+    # tiene need_pick cableado).
+    respx.get(ANIMETHEMES_SEARCH).mock(return_value=httpx.Response(200, json={"search": {"anime": [
+        {"name": "Attack on Titan Season 2", "year": 2017, "season": None, "slug": "attack-on-titan-season-2"},
+    ]}}))
 
-    worker, logs, resultado = _worker(tmp_path, "Attack on Titan S02E03.mkv", usar_exacto=False)
+    worker, logs, resultado = _worker(tmp_path, "Attack on Titan S02E03.mkv")
     worker.run()
 
     assert resultado.get("ok") is True

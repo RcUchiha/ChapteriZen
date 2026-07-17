@@ -262,10 +262,6 @@ class VentanaPrincipal(QMainWindow):
         self.chk_subcarpeta = QCheckBox('Guardar en carpeta "Chapters"')
         root.addWidget(self.chk_subcarpeta)
 
-        self.chk_exacto = QCheckBox("OP/ED exactos (AnimeThemes + coincidencia de audio)")
-        self.chk_exacto.setChecked(True)
-        root.addWidget(self.chk_exacto)
-
         self.row_search = FieldRow(
             "Búsqueda en AnimeThemes (opcional)",
             placeholder="Dejar vacío para detectar automáticamente",
@@ -304,7 +300,7 @@ class VentanaPrincipal(QMainWindow):
         return [
             self.row_video.btn, self.row_outdir.btn,
             self.row_outdir.entry,
-            self.chk_subcarpeta, self.chk_exacto,
+            self.chk_subcarpeta,
             self.row_search.entry,
             self.btn_run,
         ]
@@ -337,7 +333,6 @@ class VentanaPrincipal(QMainWindow):
                 video=video,
                 carpeta_salida=self.row_outdir.get(),
                 crear_subcarpeta=self.chk_subcarpeta.isChecked(),
-                usar_exacto=self.chk_exacto.isChecked(),
                 search_override=self.row_search.get(),
             )
         except Exception as e:
@@ -354,6 +349,7 @@ class VentanaPrincipal(QMainWindow):
         self._resolver.need_pick.connect(self._on_need_pick)
         self._resolver.resolved.connect(self._on_resolved_params)
         self._resolver.failed.connect(self._on_fail)
+        self._resolver.cancelado.connect(self._on_cancelado)
         self._resolver.start()
 
     def _on_need_pick(self, req: PickRequest):
@@ -382,7 +378,7 @@ class VentanaPrincipal(QMainWindow):
         self._worker   = None
         QMessageBox.information(self, "OK", f"Chapters generados:\n{ruta_salida}")
 
-    def _on_fail(self, msg: str):
+    def _limpiar_estado_tras_terminar(self):
         self.habilitar_controles(True)
         self.progress.setValue(0)
         if self._resolver and self._resolver.isRunning():
@@ -390,8 +386,14 @@ class VentanaPrincipal(QMainWindow):
             self._resolver.wait(2000)
         self._resolver = None
         self._worker   = None
+
+    def _on_fail(self, msg: str):
+        self._limpiar_estado_tras_terminar()
         self._agregar_log(f"❌ Error: {msg}")
-        QMessageBox.critical(self, "Error", msg)
+        QMessageBox.warning(self, "Error", msg)
+
+    def _on_cancelado(self):
+        self._limpiar_estado_tras_terminar()
 
 
 def main():

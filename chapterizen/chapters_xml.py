@@ -38,8 +38,3 @@ def guardar_chapters(ruta_salida: str, chapters: List[Tuple[float, str]]):
         key=lambda x: x[0],
     )
     Path(ruta_salida).write_text(crear_chapters_xml(chapters), encoding="utf-8")
-
-def chapters_heuristicos(dur: float) -> List[Tuple[float, str]]:
-    op_inicio = 60.0 if dur > 180.0 else 0.0
-    ed_inicio = max(0.0, dur - 95.0)
-    return [(0.0, "Prólogo"), (op_inicio, "Opening"), (ed_inicio, "Ending")]

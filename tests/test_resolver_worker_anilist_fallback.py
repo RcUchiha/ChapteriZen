@@ -9,8 +9,9 @@ import respx
 from chapterizen.modelos import ParametrosTrabajo
 from chapterizen.gui.resolver_worker import ResolverWorker
 
-JIKAN_ANIME     = "https://api.jikan.moe/v4/anime"
-ANILIST_GRAPHQL = "https://graphql.anilist.co"
+JIKAN_ANIME        = "https://api.jikan.moe/v4/anime"
+ANILIST_GRAPHQL    = "https://graphql.anilist.co"
+ANIMETHEMES_SEARCH = "https://api.animethemes.moe/search"
 
 
 def _anilist_media(anilist_id, romaji, episodes=12):
@@ -38,7 +39,6 @@ def _run_resolver(tmp_path, video_name="Test Anime - 05.mkv"):
         video=str(video),
         carpeta_salida="",
         crear_subcarpeta=False,
-        usar_exacto=False,  # basta con resolver el titulo, no necesitamos AnimeThemes/audio
         search_override="",
     )
     worker = ResolverWorker(None, params, interactivo=False)
@@ -65,6 +65,13 @@ def test_jikan_agota_reintentos_usa_anilist_como_respaldo(tmp_path):
             json={"data": {"Page": {"media": [_anilist_media(999, "Test Anime")]}}},
         )
     )
+    # Mock minimo de AnimeThemes: resultado unico no ambiguo para que la
+    # resolucion de slug (que ahora corre siempre, ya no hay usar_exacto que
+    # la salte) no abra picker ni dependa de un respaldo via Jikan (que en
+    # este test esta caido a proposito).
+    respx.get(ANIMETHEMES_SEARCH).mock(return_value=httpx.Response(200, json={"search": {"anime": [
+        {"name": "Test Anime", "year": 2024, "season": None, "slug": "test-anime"},
+    ]}}))
 
     resultado, logs = _run_resolver(tmp_path)
 
@@ -136,7 +143,6 @@ def test_titulos_alternativos_de_item_anilist_son_strings_limpios(tmp_path, monk
         video=str(video),
         carpeta_salida="",
         crear_subcarpeta=False,
-        usar_exacto=True,
         search_override="",
     )
     worker = ResolverWorker(None, params, interactivo=False)
@@ -176,6 +182,13 @@ def test_jikan_confiable_false_no_dispara_fallback_de_anilist(tmp_path):
             json={"data": {"Page": {"media": [_anilist_media(999, "Test Anime")]}}},
         )
     )
+    # Mock minimo de AnimeThemes (mismo motivo que en el test anterior):
+    # resultado unico no ambiguo para el titulo base del archivo (el canon de
+    # Jikan se rechaza por no confiable, asi que la consulta sigue siendo
+    # "Test Anime"), para que la resolucion de slug no abra picker.
+    respx.get(ANIMETHEMES_SEARCH).mock(return_value=httpx.Response(200, json={"search": {"anime": [
+        {"name": "Test Anime", "year": 2024, "season": None, "slug": "test-anime"},
+    ]}}))
 
     resultado, logs = _run_resolver(tmp_path)
 

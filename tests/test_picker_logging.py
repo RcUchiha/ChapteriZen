@@ -16,7 +16,6 @@ def _worker(tmp_path, interactivo=True):
         video=str(video),
         carpeta_salida="",
         crear_subcarpeta=False,
-        usar_exacto=False,
         search_override="",
     )
     w = ResolverWorker(None, params, interactivo=interactivo)

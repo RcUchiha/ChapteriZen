@@ -52,7 +52,6 @@ class ParametrosTrabajo(BaseModel):
     video:             str
     carpeta_salida:    str
     crear_subcarpeta:  bool
-    usar_exacto:       bool
     submuestreo:       int   = Field(default=32,   ge=1)
     porcion_theme:     float = Field(default=0.90, ge=0.5, le=1.0)
     puntuacion_minima: float = Field(default=0.25, ge=0.05, le=1.0)

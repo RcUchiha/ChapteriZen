@@ -56,6 +56,9 @@ from ..jikan import (
 )
 
 
+_MSG_SELECCION_CANCELADA = "Selección cancelada."
+
+
 def _variante_oficial_que_acepta(base: str, item: dict) -> Optional[Tuple[str, str]]:
     """Busca, entre las variantes OFICIALES de título de item (sin
     sinónimos) que no sean la principal/romaji, alguna que preserve los
@@ -122,6 +125,7 @@ class ResolverWorker(_BaseWorker):
     need_pick  = pyqtSignal(object)
     resolved   = pyqtSignal(object)
     failed     = pyqtSignal(str)
+    cancelado  = pyqtSignal()
 
     def __init__(self, ventana, params: ParametrosTrabajo, interactivo: bool = True):
         super().__init__(ventana)
@@ -431,14 +435,6 @@ class ResolverWorker(_BaseWorker):
                             consulta_base, picked_base, titulo_resuelto, titulo_confiable
                         )
 
-            if not p.usar_exacto:
-                p.slug         = ""
-                p.episodio     = episodio
-                p.titulo_usado = consulta_base
-                self.progress.emit(30)
-                self.resolved.emit(p)
-                return
-
             # Pasar el item de Jikan para que _resolver_slug_con_picker pueda
             # buscar con títulos alternativos si la consulta base no da resultado.
             # Limitación conocida: cuando anilist_confirmado es True, picked_base es None
@@ -458,7 +454,10 @@ class ResolverWorker(_BaseWorker):
             self.resolved.emit(p)
 
         except Exception as e:
-            self.failed.emit(str(e))
+            if str(e) == _MSG_SELECCION_CANCELADA:
+                self.cancelado.emit()
+            else:
+                self.failed.emit(str(e))
 
     def _identificar_con_trace_moe(self, video: str) -> AnimeDetectado:
         asegurar_ffmpeg()
@@ -601,7 +600,7 @@ class ResolverWorker(_BaseWorker):
         )
         idx_elegido = self._pedir_pick(req)
         if idx_elegido is None:
-            raise RuntimeError("Selección cancelada.")
+            raise RuntimeError(_MSG_SELECCION_CANCELADA)
         titulo_jikan_orig = titulo_resuelto
         if idx_elegido == 1:
             titulo_resuelto = titulo_anilist
@@ -643,7 +642,7 @@ class ResolverWorker(_BaseWorker):
         )
         idx = self._pedir_pick(req)
         if idx is None:
-            raise RuntimeError("Selección cancelada.")
+            raise RuntimeError(_MSG_SELECCION_CANCELADA)
         return resultados[int(idx)]
 
     def _resolver_slug_con_picker(
@@ -771,7 +770,7 @@ class ResolverWorker(_BaseWorker):
             )
             idx = self._pedir_pick(req)
             if idx is None:
-                raise RuntimeError("Selección cancelada.")
+                raise RuntimeError(_MSG_SELECCION_CANCELADA)
             elegido = resultados[int(idx)]
 
         for cand in jikan_titulos_desde_item(elegido):

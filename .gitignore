@@ -224,3 +224,8 @@ scripts/simulacion_opcion2_cambios.csv
 # de archivo reales de la libreria del usuario, repo publico). El log de
 # DEBUG (*.log) ya cae bajo el patron generico existente mas arriba.
 scripts/simulacion_decision_resolver.csv
+
+# Salida de scripts/simular_atajo_por_id_animethemes.py: mismo motivo
+# (nombres de archivo reales de la libreria del usuario, repo publico).
+scripts/simulacion_atajo_id_animethemes.csv
+scripts/simulacion_atajo_id_animethemes_v2.csv

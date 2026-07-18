@@ -1,3 +1,39 @@
+## [0.1.0] — 18-07-2026
+
+### Nuevas funcionalidades
+
+- **Atajo de resolución de slug por ID externo de AnimeThemes**. En vez de depender siempre de la búsqueda por texto (con su posible ambigüedad y picker manual), `_resolver_slug_con_picker` ahora intenta primero una consulta directa por `mal_id`/`anilist_id` (`filter[has]=resources&filter[site]=...&filter[external_id]=...`, comportamiento confirmado en vivo contra la API real, no asumido) usando el ID que Jikan/AniList ya resolvieron. Solo se acepta sin picker si hay un único resultado y su nombre no pierde tokens contra alguno de los títulos que Jikan/AniList ya conocen para ese mismo item (incluye título japonés/native). Esta validación reemplaza una primera versión más estricta (comparar contra el texto crudo del filename), descartada tras confirmar con una simulación sobre los 204 archivos reales del corpus que esa versión descartaba 66/204 casos correctos solo por diferencia de idioma entre el filename y el nombre romaji de AnimeThemes. Si el ID no tiene match, o la validación rechaza, el flujo cae exactamente al camino de texto de siempre, sin cambios ahí.
+- **Título alternativo en el picker de AnimeThemes**: cada fila ambigua ahora muestra, debajo del nombre principal y en texto tenue, el synonym en inglés de AnimeThemes si existe (`include[anime]=animesynonyms`, sin ninguna consulta de red adicional — viene en la misma respuesta de búsqueda). Si no hay synonym en inglés, usa el `type="Other"` más largo entre los disponibles para esa serie (confirmado con una muestra real de 423 valores: ~75-80% es traducción útil, ~15-20% variantes de romanización, y solo 1/423 en un idioma distinto). Sin ninguno de los dos, la fila se ve igual que antes.
+- **Selección de fila consistente en los 3 pickers** (discrepancia, AnimeThemes, Jikan): usa el acento naranja que ya usa el resto de la app (`#de765d`, reusado del botón principal/checkbox/título) en vez de heredar el color de selección del tema del sistema operativo.
+- **Fallback a AniList también cuando Jikan responde sin resultados** (antes solo cubría el caso de Jikan caído/con error). Si Jikan busca y genuinamente no encuentra nada para la consulta, ahora se prueba la misma consulta en AniList antes de darse por vencido.
+
+### Correcciones de bugs
+
+- **El sink de logging a disco se configuraba con solo importar `chapterizen.config`**, sin distinguir la GUI real de tests o scripts standalone — cualquier corrida de la suite de tests escribía entradas de log reales (con datos sintéticos de fixtures) en el mismo archivo de producción. Movido a una función explícita (`configurar_logging_produccion()`), llamada una sola vez desde el arranque real de la GUI; importar el paquete para tests/scripts ya no tiene ningún efecto secundario sobre logging.
+- **Camino A (temporada explícita en el nombre de archivo) no actualizaba `picked_base` a la temporada recién resuelta**, a diferencia de Camino B — encontrado mientras se construía el atajo por ID de arriba: sin este fix, el atajo (y el respaldo de títulos alternativos) hubiera seguido operando sobre la temporada 1 original en vez de la temporada correcta. Corregido reasignando `picked_base` solo cuando el canon de la nueva temporada es efectivamente aceptado — si se rechaza por recorte de tokens, `picked_base` sigue siendo la temporada base, sin reusar una entidad que el propio pipeline acaba de descartar.
+
+### Refactors
+
+- **Checkbox "OP/ED exactos" eliminado — el modo exacto pasa a ser el único comportamiento.** Antes, desmarcarlo saltaba AnimeThemes y el matching de audio, generando capítulos heurísticos aproximados sin advertencia; y aun con el checkbox marcado, si el matching no encontraba coincidencia suficiente, el pipeline caía al mismo heurístico en silencio. Ahora cualquier fallo (serie sin OP/ED catalogado en AnimeThemes, o sin coincidencia de audio suficiente) termina sin generar ningún XML, con un mensaje de log específico de la causa puntual. Como parte del mismo cambio, la ventana de fallo ahora distingue un error real (`QMessageBox.warning`, antes `.critical`) de una cancelación de picker por el usuario (sin ninguna ventana emergente — antes ambas mostraban el mismo popup de error, vía una señal `cancelado` nueva y separada de `failed`).
+- **Los 3 parámetros de afinación fina del matching de audio** (submuestreo, porción del tema, umbral de puntuación) **se sacaron de la GUI**, sin evidencia de que ningún usuario los haya tocado nunca en uso real — quedan fijos en los mismos valores por defecto que `ParametrosTrabajo` ya validaba internamente, sin pérdida de validación.
+- **`chapterizen.py` (monolito original, congelado en v0.0.7) eliminado del repo.** Confirmado por grep que nada en el código activo (paquete, tests, scripts) lo importaba, ejecutaba o dependía de él.
+
+### Documentación
+
+- Nueva entrada en `docs/KNOWN_LIMITATIONS.md`: `_THEMES_DIR` (audio de OP/ED descargado) crece sin ningún límite de tamaño ni antigüedad — una política de limpieza queda anotada como investigación aparte, sin implementar todavía.
+- Nueva entrada en `docs/KNOWN_LIMITATIONS.md`: releases que omiten el apóstrofe en el nombre de archivo (convención común de release groups) pueden hacer que la búsqueda en AniList no encuentre match aunque el parsing sea correcto — el picker de AnimeThemes ya cubre este caso como red de seguridad, no se considera un bug a corregir.
+- Nueva entrada en `docs/KNOWN_LIMITATIONS.md`: el atajo por ID externo protege contra un recurso mal enlazado dentro de AnimeThemes, no contra una identificación previa equivocada en una capa anterior del pipeline (Jikan/AniList/trace.moe) — queda anotado como investigación aparte, sin evidencia real todavía de que ocurra.
+- Entrada de `docs/KNOWN_LIMITATIONS.md` sobre el título con artefacto pegado (caso real Tojima) actualizada a `[CORREGIDO]`; referencia obsoleta a `usar_exacto` corregida en la entrada de título dual-idioma.
+- Entrada de `docs/TECH_DEBT.md` sobre la divergencia de `chapterizen.py` marcada `[RESUELTO]` (el archivo se eliminó).
+- Ítems ya resueltos (parámetros de matching, checkbox "OP/ED exactos") eliminados de `docs/ideas.md`.
+
+### Otros
+
+- Nuevo script de diagnóstico `scripts/simular_atajo_por_id_animethemes.py` (no forma parte de la app) — usado para validar el diseño del atajo por ID y su validación cruzada contra los 204 archivos reales del corpus antes de tocar producción.
+- Bump de versión 0.0.9 → 0.1.0.
+
+---
+
 ## [0.0.9] — 16-07-2026
 
 ### Nuevas funcionalidades

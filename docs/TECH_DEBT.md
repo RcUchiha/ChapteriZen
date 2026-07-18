@@ -5,27 +5,26 @@ Deuda técnica interna: código o estructura que funciona correctamente hoy
 `docs/KNOWN_LIMITATIONS.md`) pero que amerita limpieza o reorganización
 futura.
 
-## `chapterizen.py` (monolito legacy en la raíz) diverge del paquete
+## [RESUELTO] `chapterizen.py` (monolito legacy en la raíz) diverge del paquete
 
-`chapterizen.py` en la raíz del repo es el monolito original (v0.0.7) que
-antecede al paquete `chapterizen/`. Ya no es el código que ejecuta la GUI
-(`chapterizen/__main__.py` es el entry point actual), pero sigue presente
-en el repo.
+`chapterizen.py` en la raíz del repo era el monolito original (v0.0.7) que
+antecedía al paquete `chapterizen/`. Ya no era el código que ejecutaba la
+GUI (`chapterizen/__main__.py` es el entry point desde la modularización),
+pero seguía presente en el repo como referencia.
 
-Ese archivo todavía usa su propia copia de `_aplicar_canon` (versión vieja,
-sin el chequeo de variantes oficiales de título) en sus 3 call sites — la
+Ese archivo usaba su propia copia de `_aplicar_canon` (versión vieja, sin
+el chequeo de variantes oficiales de título) en sus 3 call sites — la
 versión equivalente en el paquete (`ResolverWorker._aplicar_canon_multivariante`,
 `gui/resolver_worker.py`) sí prueba esas variantes desde el commit `895b51e`.
-Es decir, monolito y paquete ya producen resultados distintos ante el mismo
-input en el caso de variantes de idioma (ver `_variante_oficial_que_acepta`
-en `resolver_worker.py`). La versión muerta de `_aplicar_canon` que vivía en
-`chapterizen/jikan.py` (sin callers en el paquete, confirmado con grep) ya
-se eliminó de ahí.
+Es decir, monolito y paquete ya producían resultados distintos ante el
+mismo input en el caso de variantes de idioma.
 
-Esta divergencia es un motivo más (además de ser código duplicado sin
-mantenimiento) para eliminar `chapterizen.py` cuando corresponda. No se
-toca ahora — requiere confirmar antes que nada externo lo importe como
-módulo.
+**Resuelto en la versión 0.1.0**: confirmado por grep que nada en el
+código activo (paquete `chapterizen/`, tests, scripts) importa, ejecuta
+o depende de `chapterizen.py` — los `from chapterizen import ...` de los
+tests siempre resuelven al paquete, nunca al archivo plano (no es un path
+de import válido). Se eliminó el archivo del repo; la divergencia queda
+sin objeto.
 
 ## [CORREGIDO] El sink de loguru se configuraba al importar `config.py`, sin distinguir GUI de tests/scripts
 

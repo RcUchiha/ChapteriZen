@@ -14,7 +14,7 @@ Generador automático de capítulos (chapters) para episodios de anime. A partir
 5. **Matching de audio FFT → DTW** contra el video del episodio, para ubicar el inicio y fin exactos del OP/ED.
 6. **Generación del XML de capítulos** (formato mkvmerge), guardado junto al video o en la carpeta que se indique.
 
-Si el matching exacto no está disponible o se desactiva, el programa genera capítulos heurísticos (introducción / episodio / conclusión) como respaldo.
+Si AnimeThemes no tiene ningún OP/ED catalogado para la serie, o el matching de audio no encuentra una coincidencia suficiente, no se genera ningún XML — el log explica la causa específica.
 
 ## Requisitos
 
@@ -42,9 +42,7 @@ Es una aplicación de escritorio (PyQt6), sin flags de línea de comandos. En la
 
 - **Video** — el archivo a procesar (extensiones soportadas: `.mkv .mp4 .avi .webm .mov .m2ts .ts .wmv .vob`).
 - **Carpeta de salida** — opcional; si se deja vacía, el XML se guarda junto al video. Con la casilla **"Guardar en carpeta Chapters"** se guarda en una subcarpeta `Chapters/` en vez de la carpeta del video.
-- **OP/ED exactos (AnimeThemes + coincidencia de audio)** — activado por defecto; si se desactiva, se generan capítulos heurísticos sin identificar el anime ni descargar audio.
 - **Búsqueda en AnimeThemes (opcional)** — para forzar manualmente el término de búsqueda en vez de que se infiera del nombre de archivo.
-- **Parámetros de coincidencia** — ajustes finos del matching de audio: submuestreo, porción del theme a comparar (0.5–1.0) y umbral mínimo de puntuación (0.10–0.40). Los valores por defecto funcionan bien en la mayoría de los casos.
 
 Durante el proceso, si hace falta desambiguar (varios resultados posibles en Jikan/AniList/AnimeThemes, o una discrepancia entre fuentes), se abre un selector para elegir manualmente — queda registrado en el log tanto la apertura del selector como la opción elegida.
 
@@ -70,8 +68,6 @@ chapterizen/
     └── chapterizer_worker.py         # QThread: generación de capítulos (ChapterizerWorker)
 ```
 
-`chapterizen.py`, en la raíz del repo, es el monolito original previo a esta modularización. Se mantiene intencionalmente en el repo como referencia mientras se termina de validar el paquete `chapterizen/` en uso real — se eliminará en una versión futura una vez confirmada la estabilidad.
-
 ## Tests
 
 ```bash
@@ -88,9 +84,8 @@ python -m pyflakes chapterizen/
 
 ## Estado actual
 
-- **Versión**: 0.0.9 — ver [`docs/CHANGELOG.md`](docs/CHANGELOG.md) para el historial completo de cambios por versión.
+- **Versión**: 0.1.0 — ver [`docs/CHANGELOG.md`](docs/CHANGELOG.md) para el historial completo de cambios por versión.
 - **Limitaciones conocidas**: ver [`docs/KNOWN_LIMITATIONS.md`](docs/KNOWN_LIMITATIONS.md). Actualmente hay un caso sin cubrir (nombres de archivo con el título en dos idiomas concatenados en un mismo string, ej. `"Chained Soldier (Mato Seihei no Slave)"`), que degrada de forma segura al selector manual sin romper el flujo.
-- El paquete `chapterizen/` (modularizado) es la versión activa y mantenida; `chapterizen.py` es solo referencia temporal, como se explica arriba.
 
 ## Licencia
 

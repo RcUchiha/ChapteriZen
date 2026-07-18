@@ -71,8 +71,8 @@ resultados (confirmado en vivo contra AniList real: 0 resultados). Como
 picked_base queda None, ni el gate multivariante (895b51e) ni la
 navegación de secuela llegan a activarse — el flujo degrada con
 seguridad (titulo_confiable=False, sin crashear) pero probablemente
-termina en el picker manual con usar_exacto=True, perdiendo la
-resolución automática.
+termina en el picker manual de AnimeThemes, perdiendo la resolución
+automática.
 
 No cubierto todavía. Posible solución futura: detectar el patrón
 "Título (Título Alterno)" durante el parsing y probar cada mitad como

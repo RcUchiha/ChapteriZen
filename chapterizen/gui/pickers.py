@@ -3,6 +3,7 @@ resultados de Jikan/AnimeThemes/discrepancias). Movido sin cambios
 desde chapterizen.py (monolito original, v0.0.7)."""
 from typing import Optional, Tuple, List
 
+from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import (
     QDialog,
     QVBoxLayout,
@@ -12,7 +13,46 @@ from PyQt6.QtWidgets import (
     QTableWidget,
     QTableWidgetItem,
     QHeaderView,
+    QWidget,
 )
+
+_ALTO_FILA_CON_SUBTITULO = 44  # 2 lineas (13px + 11px) necesitan mas alto que la fila default
+
+
+def _celda_con_subtitulo(titulo: str, subtitulo: str) -> QWidget:
+    """Widget compuesto para la columna 0 cuando hay un titulo alternativo
+    (ej. synonym en ingles de AnimeThemes) -- 2 QLabel apilados: principal
+    con el estilo por defecto, secundario chico y tenue (11px, #888888 --
+    mismos valores que QLabel#section en el stylesheet de __main__.py, no
+    un gris inventado).
+
+    WA_TransparentForMouseEvents se pone en el contenedor Y en cada QLabel
+    a proposito: en Qt, un click sobre un widget hijo (los QLabel) se
+    resuelve contra ESE hijo primero, no contra el contenedor -- si solo
+    el contenedor fuera transparente a mouse, un click justo sobre el
+    texto de un QLabel igual quedaria absorbido ahi y nunca llegaria a la
+    tabla. Marcando los 3 (contenedor + 2 labels), cualquier click dentro
+    de la celda cae directo al viewport de la QTableWidget de atras --
+    preserva selección de fila y cellDoubleClicked (aceptar con doble
+    click) exactamente igual que con un QTableWidgetItem comun."""
+    contenedor = QWidget()
+    contenedor.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
+    contenedor.setStyleSheet("background: transparent;")
+
+    lay = QVBoxLayout(contenedor)
+    lay.setContentsMargins(4, 2, 4, 2)
+    lay.setSpacing(0)
+
+    lbl_principal = QLabel(titulo)
+    lbl_principal.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
+
+    lbl_secundario = QLabel(subtitulo)
+    lbl_secundario.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
+    lbl_secundario.setStyleSheet("font-size: 11px; color: #888888;")
+
+    lay.addWidget(lbl_principal)
+    lay.addWidget(lbl_secundario)
+    return contenedor
 
 
 class DialogoSelectorTabla(QDialog):
@@ -23,6 +63,7 @@ class DialogoSelectorTabla(QDialog):
         subtitulo: str,
         columnas:  List[Tuple[str, int]],
         filas:     List[List[str]],
+        subfilas:  Optional[List[Optional[str]]] = None,
     ):
         super().__init__(ventana_padre)
         self.setWindowTitle(titulo)
@@ -46,8 +87,14 @@ class DialogoSelectorTabla(QDialog):
             self.table.setColumnWidth(j, w)
 
         for i, fila in enumerate(filas):
+            subtitulo_fila = subfilas[i] if subfilas and i < len(subfilas) else None
             for j, val in enumerate(fila):
-                self.table.setItem(i, j, QTableWidgetItem(val))
+                if j == 0 and subtitulo_fila:
+                    self.table.setCellWidget(i, j, _celda_con_subtitulo(val, subtitulo_fila))
+                else:
+                    self.table.setItem(i, j, QTableWidgetItem(val))
+            if subtitulo_fila:
+                self.table.setRowHeight(i, _ALTO_FILA_CON_SUBTITULO)
 
         hh = self.table.horizontalHeader()
         hh.setStretchLastSection(True)

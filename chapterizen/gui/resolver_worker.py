@@ -729,6 +729,18 @@ class ResolverWorker(_BaseWorker):
             ]
             for it in resultados
         ]
+        # Synonym en ingles (si existe) para mostrar como subtitulo tenue
+        # debajo del nombre principal -- viene de la misma respuesta de
+        # busqueda (include[anime]=animesynonyms en buscar_anime_en_animethemes),
+        # sin ninguna consulta adicional. None por candidato sin synonym
+        # English -- DialogoSelectorTabla deja esa fila igual que hoy.
+        subfilas = [
+            next(
+                (s.get("text") for s in (it.get("animesynonyms") or []) if s.get("type") == "English"),
+                None,
+            )
+            for it in resultados
+        ]
         req = PickRequest(
             kind="animethemes",
             titulo="Selecciona el anime correcto (AnimeThemes)",
@@ -739,6 +751,7 @@ class ResolverWorker(_BaseWorker):
             columnas=[("Nombre", 520), ("Año", 70), ("Temporada", 110), ("Slug", 260)],
             filas=filas,
             payload=resultados,
+            subfilas=subfilas,
         )
         idx = self._pedir_pick(req)
         if idx is None:

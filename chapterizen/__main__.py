@@ -354,7 +354,7 @@ class VentanaPrincipal(QMainWindow):
 
     def _on_need_pick(self, req: PickRequest):
         dlg = DialogoSelectorTabla(
-            self, req.titulo, req.subtitulo, req.columnas, req.filas
+            self, req.titulo, req.subtitulo, req.columnas, req.filas, req.subfilas
         )
         idx = dlg.indice_seleccionado() if dlg.exec() == QDialog.DialogCode.Accepted else None
         if self._resolver:

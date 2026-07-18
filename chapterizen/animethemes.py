@@ -23,13 +23,24 @@ from .ffmpeg_utils import extraer_audio_wav_mono_16k
 
 @_reintento_http
 def buscar_anime_en_animethemes(nombre_busqueda: str) -> List[dict]:
-    clave = f"at_search:{nombre_busqueda.strip().casefold()}"
+    # v2: agrega include[anime]=animesynonyms (title en ingles/nativo por
+    # candidato, sin costo extra -- confirmado en vivo, viene en la misma
+    # respuesta). Clave de cache con sufijo de version a proposito: las
+    # entradas v1 (sin animesynonyms) siguen cacheadas hasta su propio TTL
+    # bajo la clave vieja, pero nunca se sirven mezcladas con el shape
+    # nuevo -- evita el escenario de "mismo picker, a veces con ingles y
+    # a veces sin, segun que entrada haya pegado en cache".
+    clave = f"at_search:v2:{nombre_busqueda.strip().casefold()}"
     cached = get_api_cache().get(clave)
     if cached is not None:
         return cached
     r = _http.get(
         ANIMETHEMES_SEARCH,
-        params={"fields[search]": "anime", "q": nombre_busqueda},
+        params={
+            "fields[search]": "anime",
+            "q": nombre_busqueda,
+            "include[anime]": "animesynonyms",
+        },
     )
     r.raise_for_status()
     js      = r.json()

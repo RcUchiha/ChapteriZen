@@ -71,4 +71,11 @@ class PickRequest(BaseModel):
     filas:     List[List[str]]
     payload:   List[dict]
 
+    # Texto secundario opcional por fila, para la columna 0 (ej. synonym
+    # en ingles de AnimeThemes) -- None por entrada si esa fila no tiene
+    # subtitulo, o el campo entero None si el picker no usa esta funcion
+    # en absoluto (los pickers de "discrepancia" y "jikan" no la pasan,
+    # y su comportamiento queda exactamente igual que antes de esto).
+    subfilas: Optional[List[Optional[str]]] = None
+
     model_config = {"arbitrary_types_allowed": True}

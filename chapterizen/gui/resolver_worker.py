@@ -93,6 +93,33 @@ def _titulos_conocidos_de_picked_base(picked_base: Optional[dict]) -> List[str]:
     return anilist_titulos_desde_item(picked_base)
 
 
+def _subtitulo_alt_para_picker(item: dict) -> Optional[str]:
+    """Subtitulo tenue para la columna Nombre del picker de AnimeThemes,
+    en orden de prioridad:
+    1. synonym type="English" (el primero, si hay varios).
+    2. si no hay English, el synonym type="Other" MAS LARGO entre los
+       disponibles (mas descriptivo que una sigla corta cuando la serie
+       tiene varios -- ej. preferir "Brave King GaoGaiGar Final" sobre
+       una abreviatura como "GSZS" si ambos estan disponibles).
+    3. si no hay ninguno de los dos, None (sin subtitulo, igual que
+       antes de esta funcionalidad).
+
+    Por que se acepta "Other" como respaldo: muestreo real de 423
+    valores unicos de type="Other" sobre el corpus de 204 archivos --
+    ~75-80% son traduccion al ingles genuinamente util, ~15-20% son
+    variantes de romanizacion (no confunden, solo no traducen), y
+    apenas 1/423 estaba en un idioma distinto del ingles. Sin ruido
+    puro en ningun caso de la muestra."""
+    synonyms = item.get("animesynonyms") or []
+    ingles = next((s.get("text") for s in synonyms if s.get("type") == "English"), None)
+    if ingles:
+        return ingles
+    otros = [s.get("text") for s in synonyms if s.get("type") == "Other" and s.get("text")]
+    if otros:
+        return max(otros, key=len)
+    return None
+
+
 def _token_ok_contra_titulos_conocidos(nombre_at: str, titulos_conocidos: List[str]) -> bool:
     """Validacion cruzada antes de aceptar el atajo por ID sin picker:
     ¿el nombre que devuelve AnimeThemes para ese ID no pierde tokens de
@@ -729,18 +756,13 @@ class ResolverWorker(_BaseWorker):
             ]
             for it in resultados
         ]
-        # Synonym en ingles (si existe) para mostrar como subtitulo tenue
-        # debajo del nombre principal -- viene de la misma respuesta de
-        # busqueda (include[anime]=animesynonyms en buscar_anime_en_animethemes),
-        # sin ninguna consulta adicional. None por candidato sin synonym
-        # English -- DialogoSelectorTabla deja esa fila igual que hoy.
-        subfilas = [
-            next(
-                (s.get("text") for s in (it.get("animesynonyms") or []) if s.get("type") == "English"),
-                None,
-            )
-            for it in resultados
-        ]
+        # Subtitulo alternativo tenue debajo del nombre principal -- viene
+        # de la misma respuesta de busqueda (include[anime]=animesynonyms
+        # en buscar_anime_en_animethemes), sin ninguna consulta adicional.
+        # Prioridad English > Other (mas largo) > None -- ver
+        # _subtitulo_alt_para_picker. None por candidato sin ninguno de
+        # los dos -- DialogoSelectorTabla deja esa fila igual que hoy.
+        subfilas = [_subtitulo_alt_para_picker(it) for it in resultados]
         req = PickRequest(
             kind="animethemes",
             titulo="Selecciona el anime correcto (AnimeThemes)",

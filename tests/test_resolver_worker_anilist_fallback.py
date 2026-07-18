@@ -205,3 +205,34 @@ def test_jikan_confiable_false_no_dispara_fallback_de_anilist(tmp_path):
     assert resultado.get("ok") is True
     assert not any("usando AniList como respaldo" in s for s in logs)
     assert anilist_route.call_count == 0
+
+
+@respx.mock
+def test_jikan_responde_200_vacio_no_prueba_anilist_CARACTERIZACION(tmp_path):
+    """Caracterizacion (documenta el comportamiento ACTUAL, antes del fix
+    del gap de docs/ideas.md #8/#9): Jikan responde 200 con data=[] --
+    busco y genuinamente no encontro nada, no es una falla de servicio.
+    jikan_resolver_titulo no lanza excepcion en ese caso (devuelve
+    (q, None, False, 0.0), ver jikan.py:224-225) -- el `except` que
+    dispara el fallback a AniList en resolver_worker.py nunca se activa,
+    porque nunca hubo excepcion que atrapar. Hoy este caso termina
+    fallando via el respaldo interno de Jikan (_resolver_via_jikan_con_picker),
+    sin haber intentado AniList en absoluto -- pese a que docs/TECH_DEBT.md
+    ya documenta que Jikan puede estar caido/vacio con más frecuencia de
+    lo esperado en uso real."""
+    respx.get(JIKAN_ANIME).mock(return_value=httpx.Response(200, json={"data": []}))
+    anilist_route = respx.post(ANILIST_GRAPHQL).mock(
+        return_value=httpx.Response(
+            200,
+            json={"data": {"Page": {"media": [_anilist_media(999, "Test Anime")]}}},
+        )
+    )
+    respx.get(ANIMETHEMES_SEARCH).mock(return_value=httpx.Response(200, json={"search": {"anime": []}}))
+
+    resultado, logs = _run_resolver(tmp_path)
+
+    assert resultado.get("ok") is False
+    assert "Jikan no devolvió resultados." in resultado.get("error", "")
+    assert anilist_route.call_count == 0
+    assert "  - No se encontraron resultados." in logs
+    assert not any("AniList" in s for s in logs)

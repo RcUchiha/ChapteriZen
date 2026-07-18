@@ -259,3 +259,38 @@ devuelve vacío, hoy solo cubre el caso de error de Jikan, no el de
 respuesta vacía) más adelante: si Jikan cae con esta frecuencia en uso
 real, ese gap importa más de lo que parecía cuando se documentó
 originalmente.
+
+## El .exe de PyInstaller debe construirse con un venv limpio, no con el Python de desarrollo
+
+`ChapteriZen.spec` arma el ejecutable a partir de `run.py` (necesario
+porque `chapterizen/__main__.py` usa imports relativos y PyInstaller no
+puede apuntar directo a un módulo dentro de un paquete). Al construir la
+primera vez contra el Python global de la máquina de desarrollo (con
+`torch`, `pandas`, `scikit-learn`, `sqlalchemy`, `matplotlib`, `sympy`,
+`dask`, `lightning`, `aiohttp` instalados para otros proyectos, ninguno
+de ellos en `requirements.txt`), el `.exe` resultó de **294.8 MB**.
+
+Causa confirmada: el hook de `librosa` de `pyinstaller-hooks-contrib`
+usa `collect_submodules("librosa")`, que fuerza el análisis de **todos**
+los submódulos de librosa aunque la app no los use — incluye
+submódulos con imports condicionales opcionales (soporte experimental
+de tensores vía `try: import torch`, decomposición NMF vía
+`sklearn.decomposition`, etc.). Si esos paquetes están instalados
+(aunque sean de otro proyecto), PyInstaller los arrastra enteros con su
+cadena transitiva completa — en este caso incluyendo intentos fallidos
+de bundlear DLLs de CUDA (`nvrtc64_120_0.dll`, `nvcuda.dll`).
+
+Reconstruyendo con un venv nuevo (`python -m venv`) con **solo**
+`requirements.txt` + `pyinstaller` instalados, el mismo `.spec` produjo
+un `.exe` de **139.4 MB** — sin torch/pandas/sqlalchemy/matplotlib/
+sympy/dask/lightning/aiohttp, y con el flujo completo (red + ffmpeg +
+FFT/DTW real) verificado end-to-end sin diferencias de resultado
+contra la build "sucia". `scikit-learn` sí quedó incluido en ambas —
+es una dependencia transitiva real de librosa (confirmada por
+`pip install -r requirements.txt` instalándola sola), no parte de la
+contaminación.
+
+**Implicación práctica:** cualquier rebuild futuro del `.exe` debe
+partir de un venv nuevo con únicamente `requirements.txt` +
+`pyinstaller` instalados — nunca del intérprete de desarrollo con
+librerías acumuladas de otros proyectos.

@@ -358,6 +358,18 @@ class ResolverWorker(_BaseWorker):
                             raise
                         self._log("  - ⚠️ Jikan no disponible, usando AniList como respaldo…")
                         titulo_resuelto, picked_base, titulo_confiable, ts1_base = anilist_buscar_titulo(consulta_jikan)
+                    else:
+                        # Jikan respondió sin error pero genuinamente no encontró
+                        # nada (jikan_resolver_titulo devuelve picked_base=None
+                        # sin lanzar excepción en ese caso) -- distinto del caso
+                        # de arriba (Jikan caído/con error): acá Jikan sí está
+                        # disponible, por eso el mensaje no dice "no disponible".
+                        # Misma consulta sin ningún ajuste: no hay ninguna señal
+                        # sobre POR QUÉ Jikan no encontró nada que justifique
+                        # cambiarla antes de probar AniList.
+                        if picked_base is None:
+                            self._log("  - ⚠️ Jikan no encontró resultados, probando AniList…")
+                            titulo_resuelto, picked_base, titulo_confiable, ts1_base = anilist_buscar_titulo(consulta_jikan)
                     log_clv(logger.debug, "jikan_query", q=consulta_jikan, from_base=consulta_base,
                             origen="trace_moe" if _via_trace_moe else "filename")
                     log_clv(

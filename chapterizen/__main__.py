@@ -133,6 +133,10 @@ QTableWidget {
     color: #d4d4d4;
     gridline-color: #2a2a2a;
 }
+QTableWidget::item:selected {
+    background-color: #de765d;
+    color: #1e1e1e;
+}
 QHeaderView::section {
     background-color: #1a1a1a;
     color: #888888;

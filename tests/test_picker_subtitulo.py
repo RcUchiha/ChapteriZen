@@ -17,13 +17,20 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 import pytest
 from PyQt6.QtWidgets import QApplication
 
-from chapterizen.gui.pickers import DialogoSelectorTabla
+from chapterizen.gui.pickers import (
+    DialogoSelectorTabla,
+    _ESTILO_TITULO_NORMAL,
+    _ESTILO_TITULO_SELECCIONADO,
+    _ESTILO_SUBTITULO_NORMAL,
+    _ESTILO_SUBTITULO_SELECCIONADO,
+)
 
 COLUMNAS = [("Nombre", 200), ("Año", 60)]
 FILAS = [
     ["Serie A", "2020"],
     ["Serie B", "2021"],
 ]
+SUBFILAS_AMBAS = ["Alt A", "Alt B"]
 
 
 @pytest.fixture(scope="module")
@@ -74,3 +81,37 @@ def test_subfila_con_texto_agrega_widget_solo_en_esa_fila_columna_0(qapp):
     assert dlg.table.item(1, 0) is None
     assert dlg.table.item(1, 1) is not None
     assert dlg.table.item(1, 1).text() == "2021"
+
+
+def test_fila_seleccionada_por_defecto_usa_colores_de_seleccion(qapp):
+    """DialogoSelectorTabla selecciona la fila 0 al construirse
+    (selectRow(0)) -- si esa fila tiene subtitulo, sus labels deben
+    arrancar ya con el estilo de seleccionado (oscuro sobre el naranja
+    de QTableWidget::item:selected), no con el normal. La fila 1 (no
+    seleccionada) debe quedar en el estilo normal."""
+    dlg = DialogoSelectorTabla(None, "titulo", "subtitulo", COLUMNAS, FILAS, SUBFILAS_AMBAS)
+
+    lbl_principal_0, lbl_secundario_0 = dlg._celdas_compuestas[0]
+    assert lbl_principal_0.styleSheet() == _ESTILO_TITULO_SELECCIONADO
+    assert lbl_secundario_0.styleSheet() == _ESTILO_SUBTITULO_SELECCIONADO
+
+    lbl_principal_1, lbl_secundario_1 = dlg._celdas_compuestas[1]
+    assert lbl_principal_1.styleSheet() == _ESTILO_TITULO_NORMAL
+    assert lbl_secundario_1.styleSheet() == _ESTILO_SUBTITULO_NORMAL
+
+
+def test_cambiar_seleccion_alterna_los_colores_entre_filas(qapp):
+    """Al seleccionar la fila 1, sus labels pasan a seleccionado y los
+    de la fila 0 (antes seleccionada) vuelven a normal -- confirma que
+    el toggle reacciona a cambios de seleccion, no solo al estado inicial."""
+    dlg = DialogoSelectorTabla(None, "titulo", "subtitulo", COLUMNAS, FILAS, SUBFILAS_AMBAS)
+
+    dlg.table.selectRow(1)
+
+    lbl_principal_0, lbl_secundario_0 = dlg._celdas_compuestas[0]
+    assert lbl_principal_0.styleSheet() == _ESTILO_TITULO_NORMAL
+    assert lbl_secundario_0.styleSheet() == _ESTILO_SUBTITULO_NORMAL
+
+    lbl_principal_1, lbl_secundario_1 = dlg._celdas_compuestas[1]
+    assert lbl_principal_1.styleSheet() == _ESTILO_TITULO_SELECCIONADO
+    assert lbl_secundario_1.styleSheet() == _ESTILO_SUBTITULO_SELECCIONADO

@@ -294,3 +294,41 @@ contaminación.
 partir de un venv nuevo con únicamente `requirements.txt` +
 `pyinstaller` instalados — nunca del intérprete de desarrollo con
 librerías acumuladas de otros proyectos.
+
+## Excluir `scipy.optimize._highspy` del `.exe` rompe `librosa.sequence.dtw()` — no es una exclusión segura
+
+Con el desglose de tamaño de `ChapteriZen.exe` (build `--onedir` de
+diagnóstico), se identificó `scipy.optimize._highspy` (solver de
+programación lineal/entera de `scipy.optimize.linprog`, ~7.4 MB) como
+candidato a excluir vía `excludes=` en `ChapteriZen.spec` — ni
+`audio_matching.py` ni las funciones de librosa que se llaman (`mfcc`,
+`chroma_stft`, `sequence.dtw`, `util.normalize`) hacen programación
+lineal, así que en teoría no debería hacer falta.
+
+**Probado y revertido tras confirmar con la prueba de flujo completo
+real** (video real → AnimeThemes → FFT/DTW → XML) que la exclusión
+rompe el matching: con `scipy.optimize._highspy` excluido,
+`librosa.sequence.dtw()` falla en tiempo de ejecución con
+`ModuleNotFoundError: No module named 'scipy.optimize._highspy'`,
+capturado por el `try/except` existente en `chapterizer_worker.py` que
+cae a un score solo-FFT (peor, sin verificación cruzada por DTW) —
+en la corrida de prueba, el OP directamente no se detectó (antes sí,
+con score 0.766) y el ED bajó de score 0.778 a 0.287 (el mismo valor
+que da el FFT solo, confirmando que el paso DTW nunca corrió).
+
+**Causa:** `scipy/optimize/__init__.py` importa todo el árbol de
+submódulos de `scipy.optimize` al inicializarse (no son imports
+perezosos por función) — excluir cualquier submódulo individual de
+`scipy.optimize` (no solo `_highspy`) tira abajo la inicialización del
+subpaquete completo, aunque el código que realmente se ejecuta nunca
+toque esa pieza puntual. Esto es distinto del caso de `librosa`
+(collect_submodules fuerza el análisis pero cada submódulo se importa
+independiente) — acá es el propio `scipy.optimize` el que no tolera
+exclusiones parciales.
+
+**Decisión:** no excluir ningún submódulo de `scipy.optimize` en
+`ChapteriZen.spec`. Documentado explícitamente en el comentario del
+`.spec` para que nadie reintente esta misma exclusión sin saber por
+qué falla. `sklearn` (excluido en el mismo commit, ~12 MB) sí se
+confirmó seguro con la misma prueba — no tiene esta clase de problema
+de inicialización de paquete.

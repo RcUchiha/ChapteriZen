@@ -10,6 +10,22 @@
 # lo que este instalado, sin que sea una dependencia real de la app. Detalle
 # completo en docs/TECH_DEBT.md.
 
+# Excluida tras confirmar por grep que audio_matching.py y las funciones de
+# librosa que llamamos (mfcc, chroma_stft, sequence.dtw, util.normalize) no
+# la usan -- es arrastrada solo porque el hook de librosa fuerza el analisis
+# de todo su arbol de submodulos (ver docs/TECH_DEBT.md). Validada con la
+# misma prueba de flujo completo (video real -> AnimeThemes -> FFT/DTW ->
+# XML) antes de darla por segura.
+#
+# NO agregar 'scipy.optimize._highspy' aca -- probado y revertido: rompe
+# librosa.sequence.dtw() (scipy/optimize/__init__.py importa su arbol
+# completo al inicializarse, asi que excluir cualquier submodulo individual
+# de scipy.optimize tira abajo el subpaquete entero, no solo esa pieza).
+# Ver docs/TECH_DEBT.md.
+_EXCLUDES = [
+    'sklearn',  # dependencia transitiva real de librosa, ~12MB, no usada por nuestro codigo
+]
+
 a = Analysis(
     ['run.py'],
     pathex=['.'],
@@ -19,7 +35,7 @@ a = Analysis(
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
-    excludes=[],
+    excludes=_EXCLUDES,
     noarchive=False,
     optimize=0,
 )

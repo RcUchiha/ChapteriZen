@@ -18,7 +18,7 @@ Si AnimeThemes no tiene ningún OP/ED catalogado para la serie, o el matching de
 
 ## Requisitos
 
-- **Python 3.10+**
+- **Python 3.11+**
 - **ffmpeg y ffprobe** disponibles en el `PATH` del sistema (se invocan como comandos externos vía `subprocess` — no son paquetes de Python, hay que instalarlos aparte).
 - Dependencias de Python listadas en `requirements.txt` (PyQt6, httpx, numpy, librosa, scipy, rapidfuzz, pydantic, diskcache, loguru, tenacity, aniparse, anitopy, entre otras).
 

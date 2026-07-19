@@ -1,11 +1,13 @@
 """Punto de entrada de la aplicacion: estilo Qt, ventana principal y
 arranque. Movido sin cambios desde chapterizen.py (monolito original,
 v0.0.7)."""
+import sys
 from pathlib import Path
 from typing import Optional
 
 import qtawesome as qta
 from PyQt6.QtCore import QObject, QEvent
+from PyQt6.QtGui import QIcon
 from PyQt6.QtWidgets import (
     QApplication,
     QCheckBox,
@@ -29,6 +31,18 @@ from .modelos import ParametrosTrabajo, PickRequest
 from .gui.pickers import DialogoSelectorTabla
 from .gui.resolver_worker import ResolverWorker
 from .gui.chapterizer_worker import ChapterizerWorker
+
+
+def _ruta_assets() -> Path:
+    """Carpeta assets/ (iconos, etc.) -- resuelve tanto corriendo desde
+    código fuente (python -m chapterizen) como empaquetado en el .exe.
+    PyInstaller extrae los datos declarados en datas= (ChapteriZen.spec)
+    a una carpeta temporal expuesta en sys._MEIPASS, distinta de donde
+    vive el código fuente -- sin este chequeo, la ruta relativa al
+    paquete apuntaría a un lugar inexistente en el .exe congelado."""
+    if hasattr(sys, "_MEIPASS"):
+        return Path(sys._MEIPASS) / "assets"
+    return Path(__file__).resolve().parent.parent / "assets"
 
 
 STYLE = """
@@ -212,6 +226,7 @@ class VentanaPrincipal(QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("ChapteriZen")
+        self.setWindowIcon(QIcon(str(_ruta_assets() / "icon.ico")))
         self.setMinimumWidth(900)
         self._worker:   Optional[ChapterizerWorker] = None
         self._resolver: Optional[ResolverWorker]    = None
@@ -401,10 +416,10 @@ class VentanaPrincipal(QMainWindow):
 
 
 def main():
-    import sys
     configurar_logging_produccion()
     app = QApplication(sys.argv)
     app.setStyle("Fusion")
+    app.setWindowIcon(QIcon(str(_ruta_assets() / "icon.ico")))
     w = VentanaPrincipal()
     w.show()
     sys.exit(app.exec())

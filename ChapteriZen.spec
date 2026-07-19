@@ -30,7 +30,11 @@ a = Analysis(
     ['run.py'],
     pathex=['.'],
     binaries=[],
-    datas=[],
+    # assets/icon.ico se resuelve en runtime via sys._MEIPASS (ver
+    # _ruta_assets() en chapterizen/__main__.py) -- el destino 'assets'
+    # (segundo elemento) mantiene la misma estructura relativa que
+    # corriendo desde codigo fuente (repo_root/assets/icon.ico).
+    datas=[('assets/icon.ico', 'assets')],
     hiddenimports=[],
     hookspath=[],
     hooksconfig={},
@@ -60,4 +64,5 @@ exe = EXE(
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
+    icon='assets/icon.ico',
 )

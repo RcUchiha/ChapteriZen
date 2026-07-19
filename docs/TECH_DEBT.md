@@ -332,3 +332,53 @@ exclusiones parciales.
 qué falla. `sklearn` (excluido en el mismo commit, ~12 MB) sí se
 confirmó seguro con la misma prueba — no tiene esta clase de problema
 de inicialización de paquete.
+
+## `_resamplear_audio` (`audio_matching.py`) reemplazó interpolación lineal manual por `librosa.resample`
+
+Auditoría de uso de librerías (código manual que podría ser una
+librería ya instalada): el resampleo del audio de un tema cuando no
+viene a 16kHz (caso raro — `construir_cache_temas` ya fuerza 16kHz vía
+ffmpeg al descargar, así que esto es una red de seguridad, no el
+camino normal) usaba interpolación lineal manual (`np.linspace` +
+`np.interp`) en vez de `librosa.resample` (respaldado por `soxr`, ya
+dependencia transitiva de librosa — `librosa` ya estaba importado en
+el mismo archivo).
+
+**Validado antes de cambiar** (no solo con tests sintéticos): se generó
+una copia a 22050Hz de un tema real (`OP1.wav` de
+`nihon_e_youkoso_elf_san`, vía ffmpeg) y se comparó, contra la
+referencia real capturada a 16kHz nativo, la interpolación lineal vs.
+`librosa.resample`:
+
+- **Fidelidad de la señal**: `librosa.resample` da media/desvío mucho
+  más cercanos a la referencia real (0.2242/3359.83 vs. 0.2241/3360.33
+  de la referencia, contra 0.2452/3332.74 de la interpolación lineal) —
+  esperable, un resampler por sinc distorsiona menos que interpolación
+  lineal.
+- **Sin silencios ni duración inesperados**: longitud de salida
+  idéntica salvo 1 muestra de diferencia (~0.06ms), tramo de silencio
+  consecutivo más largo prácticamente igual entre los tres (20195 /
+  20195 / 20154 muestras).
+- **Impacto en el matching real (costo DTW contra la referencia real)**:
+  prácticamente idéntico — 0.537706 (lineal) vs. 0.538971 (librosa),
+  ~0.24% de diferencia, sin relevancia práctica.
+
+**Decisión:** implementado — el beneficio es fidelidad de señal (mejor
+insumo para casos raros donde sí hace falta resamplear), no una mejora
+medible en el matching de este caso puntual. Extraído a
+`_resamplear_audio()` en `audio_matching.py` (antes vivía inline en
+`chapterizer_worker.py`) para poder testearlo en aislamiento — ver
+`tests/test_audio_matching.py::TestResamplearAudio`.
+
+## Duplicación real: `_normalizar_titulo` y `_ratio` idénticos en `jikan.py` y `anilist.py`
+
+Encontrado durante la misma auditoría de uso de librerías (no es un
+caso de "código manual que debería ser una librería" — ambas funciones
+ya usan rapidfuzz correctamente — es duplicación de código entre dos
+módulos). `jikan.py:151-156`/`177-179` y `anilist.py:89-94`/`97-99`
+tienen el mismo cuerpo verbatim.
+
+**No implementado todavía** — candidato chico para consolidar en un
+módulo compartido (ej. `_texto_utils.py`) en algún momento futuro, sin
+urgencia ni evidencia de que la duplicación haya causado un bug real
+hasta ahora.

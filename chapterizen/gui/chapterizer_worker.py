@@ -42,6 +42,7 @@ from ..audio_matching import (
     _fft_score,
     _dtw_score,
     obtener_features_con_cache,
+    _resamplear_audio,
     formatear_tiempo,
     _tiempo_sin_ms,
 )
@@ -110,12 +111,8 @@ class ChapterizerWorker(_BaseWorker):
                     y_th, hz_th = leer_pcm16_mono_wav(str(ruta))
                     if hz_th != _SR_TARGET:
                         self._log(f"  - ⚠️ {ruta.stem}: resampleando {hz_th}Hz → {_SR_TARGET}Hz…")
-                        razon     = _SR_TARGET / hz_th
-                        nuevo_len = int(len(y_th) * razon)
-                        x_orig    = np.linspace(0, len(y_th) - 1, len(y_th))
-                        x_nuevo   = np.linspace(0, len(y_th) - 1, nuevo_len)
-                        y_th      = np.interp(x_nuevo, x_orig, y_th).astype(np.float32)
-                        hz_th     = _SR_TARGET
+                        y_th  = _resamplear_audio(y_th, hz_th, _SR_TARGET)
+                        hz_th = _SR_TARGET
                     feat_th = obtener_features_con_cache(y_th, hz_th)
                     wavs_temas.append(TemaAudio(
                         nombre=ruta.stem,

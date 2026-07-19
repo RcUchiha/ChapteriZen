@@ -100,6 +100,25 @@ def obtener_features_con_cache(y: np.ndarray, sr: int) -> np.ndarray:
     get_api_cache().set(clave, feat, expire=_TTL_THEMES_DAYS * 86400)
     return feat
 
+# ── resampleo (caso raro: un tema descargado no vino a 16kHz) ──
+
+def _resamplear_audio(y: np.ndarray, hz_orig: int, hz_target: int) -> np.ndarray:
+    """
+    Resamplea audio de hz_orig a hz_target. Caso raro en la práctica --
+    construir_cache_temas ya fuerza 16kHz vía ffmpeg al descargar cada
+    tema, así que esto solo se ejecuta como red de seguridad.
+
+    Usa librosa.resample (respaldado por soxr, ya dependencia transitiva
+    de librosa) en vez de interpolación lineal manual -- validado contra
+    un caso real (ver docs/TECH_DEBT.md): produce audio estadísticamente
+    más fiel a la señal original (media/desvío más cercanos a una
+    referencia real capturada a 16kHz nativo), sin diferencia práctica
+    en el costo DTW resultante ni silencios/duración inesperados.
+    """
+    return librosa.resample(
+        y.astype(np.float32), orig_sr=hz_orig, target_sr=hz_target
+    ).astype(np.float32)
+
 # ── paso 1: FFT para top-K candidatos ────────
 
 def _fft_score(

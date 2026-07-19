@@ -84,7 +84,7 @@ python -m pyflakes chapterizen/
 
 ## Estado actual
 
-- **Versión**: 0.1.0 — ver [`docs/CHANGELOG.md`](docs/CHANGELOG.md) para el historial completo de cambios por versión.
+- **Versión**: 0.1.1 — ver [`docs/CHANGELOG.md`](docs/CHANGELOG.md) para el historial completo de cambios por versión.
 - **Limitaciones conocidas**: ver [`docs/KNOWN_LIMITATIONS.md`](docs/KNOWN_LIMITATIONS.md). Actualmente hay un caso sin cubrir (nombres de archivo con el título en dos idiomas concatenados en un mismo string, ej. `"Chained Soldier (Mato Seihei no Slave)"`), que degrada de forma segura al selector manual sin romper el flujo.
 
 ## Licencia

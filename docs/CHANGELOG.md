@@ -1,3 +1,28 @@
+## [0.1.1] — 19-07-2026
+
+### Correcciones de bugs
+
+- **El piso de Python declarado en `pyproject.toml` (`>=3.10`) nunca fue cierto en la práctica**: `scipy==1.17.1` (pineado en `requirements.txt`) requiere Python `>=3.11` — nadie lo había corrido contra 3.10 real hasta el primer run de CI, que falló al no encontrar una distribución de scipy compatible. Corregido a `>=3.11` en los 3 lugares que lo mencionaban (`pyproject.toml`, `README.md`, `.github/workflows/tests.yml`).
+- **4 warnings preexistentes de pyflakes limpiados** (3 re-exports sin usar en `chapterizen/__init__.py`, 1 import sin usar en un test) — necesario para que la CI pudiera fallar solo ante regresiones reales del código, no ruido ya conocido y aceptado.
+
+### Refactors
+
+- **El resampleo de audio (caso raro: un tema descargado de AnimeThemes no viene a 16kHz) pasó de interpolación lineal manual a `librosa.resample`** (respaldado por `soxr`, ya dependencia transitiva — `librosa` ya estaba importado en el mismo archivo). Validado contra audio real antes y después del cambio: señal más fiel al original (media/desvío más cercanos a una referencia real capturada a 16kHz nativo), sin silencios ni duración inesperados, y sin impacto práctico en el costo DTW resultante. Extraído a una función propia (`_resamplear_audio` en `audio_matching.py`) para poder testearse en aislamiento.
+
+### Documentación
+
+- `docs/PSEUDOCODE.md` reescrito completo — describía el diseño anterior a la versión 0.1.0 (campo `usar_exacto`, modo heurístico, parámetros de matching como campos de la GUI), sin mencionar el atajo por ID de AnimeThemes, el fallback de AniList en sus dos gatillos, ni la reasignación condicional de `picked_base` en Camino A.
+- `docs/ideas.md` reformateado: numeración renumerada sin huecos, categoría por ítem, ítems ya implementados (fallback a AniList) eliminados.
+- Referencia obsoleta a `usar_exacto` corregida en `docs/KNOWN_LIMITATIONS.md`.
+- `docs/TECH_DEBT.md`: documentada la validación completa del cambio de resampleo, y anotada (sin implementar) la duplicación de `_normalizar_titulo`/`_ratio` entre `jikan.py` y `anilist.py` como candidato chico a consolidar a futuro.
+
+### Otros
+
+- **Empaquetado en `.exe` de Windows vía PyInstaller** (`ChapteriZen.spec`, entry point `run.py` — necesario porque `chapterizen/__main__.py` usa imports relativos). Validado de punta a punta: build en un venv limpio (solo `requirements.txt` + `pyinstaller`, sin contaminación del Python de desarrollo), flujo completo real (video real → AnimeThemes → FFT/DTW → XML) automatizado vía UI Automation de Windows sobre el `.exe` congelado. Incluye exclusión de `sklearn` del bundle (~7.5MB de ahorro — dependencia transitiva de librosa no usada por el código propio, confirmado antes de excluirla).
+- **CI en GitHub Actions**: `tests.yml` corre la suite completa (pytest) y pyflakes en cada push a `main` y en cada pull request, en un runner headless con PyQt6 (Python 3.11, el piso real declarado). `release.yml` arma el `.exe` y publica un GitHub Release automáticamente al pushear un tag `v*`, con notas extraídas de la sección correspondiente de este mismo CHANGELOG (con fallback a un link si la sección no existe todavía).
+
+---
+
 ## [0.1.0] — 18-07-2026
 
 ### Nuevas funcionalidades

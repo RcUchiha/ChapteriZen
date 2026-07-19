@@ -1,0 +1,82 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+# El default_workflow_permissions de este repo es "read" -- sin esto,
+# gh release create falla con 403 (confirmado contra la config real
+# del repo, no una suposicion generica).
+permissions:
+  contents: write
+
+jobs:
+  build-and-release:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          # Piso real declarado en pyproject.toml (requires-python).
+          # Distinto de la version (3.13) con la que se valido el .exe
+          # a mano -- esta es la primera corrida real de este workflow,
+          # tratarla como una prueba, no asumir que sale igual.
+          python-version: "3.11"
+          cache: pip
+
+      - name: Instalar dependencias de Python
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt -r requirements-dev.txt pyflakes pyinstaller
+
+      - name: pytest
+        run: python -m pytest tests/ -v
+
+      - name: pyflakes
+        run: python -m pyflakes chapterizen/ tests/ scripts/
+
+      - name: Construir el .exe con PyInstaller
+        run: pyinstaller ChapteriZen.spec
+
+      - name: Preparar el asset con el nombre final
+        shell: pwsh
+        run: |
+          Copy-Item -Path "dist/ChapteriZen.exe" -Destination "dist/ChapteriZen-${{ github.ref_name }}.exe"
+
+      - name: Extraer notas desde docs/CHANGELOG.md
+        shell: pwsh
+        run: |
+          $version    = "${{ github.ref_name }}" -replace '^v', ''
+          $changelog  = Get-Content -Path "docs/CHANGELOG.md" -Raw
+          $pattern    = "(?ms)^## \[$([regex]::Escape($version))\][^\r\n]*\r?\n(.*?)(?=^## \[|\z)"
+          $match      = [regex]::Match($changelog, $pattern)
+
+          if ($match.Success) {
+            $section = $match.Groups[1].Value
+            # Sacar el separador "---" final entre entradas del CHANGELOG,
+            # si esta presente, y los espacios/lineas en blanco sobrantes.
+            $section = $section -replace '(?s)\r?\n-{3,}\s*$', ''
+            $section = $section.Trim()
+          } else {
+            # Fallback si no se encuentra la seccion (ej. se olvido
+            # agregar la entrada al CHANGELOG antes de taggear) -- no
+            # frena el release, deja notas minimas con un link.
+            $section = "No se encontro la seccion ``## [$version]`` en ``docs/CHANGELOG.md``.`n`nVer [docs/CHANGELOG.md](https://github.com/${{ github.repository }}/blob/main/docs/CHANGELOG.md) para el detalle de esta version."
+          }
+
+          Set-Content -Path release_notes.md -Value $section -NoNewline
+
+      - name: Crear el release en GitHub
+        shell: pwsh
+        run: |
+          gh release create "${{ github.ref_name }}" `
+            "dist/ChapteriZen-${{ github.ref_name }}.exe" `
+            --title "ChapteriZen ${{ github.ref_name }}" `
+            --notes-file release_notes.md
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

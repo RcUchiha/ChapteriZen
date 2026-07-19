@@ -172,8 +172,8 @@ El único `unlink()` que existe en `construir_cache_temas` borra los
 archivos de una serie puntual solo cuando su nombre cambió en
 AnimeThemes (invalidación de metadata desactualizada, no limpieza por
 espacio). No hay TTL, no hay límite de tamaño total, no hay eviction de
-series que ya no se vuelven a procesar — cada serie nueva que pasa por
-`usar_exacto=True` agrega su OP/ED a esta carpeta para siempre.
+series que ya no se vuelven a procesar — cada serie nueva que se
+procesa agrega su OP/ED a esta carpeta para siempre.
 
 Estimación (sin medición exhaustiva, orden de magnitud): ~3 temas
 promedio por serie (OGG + WAV, ~90s c/u) ≈ **15-20 MB por serie

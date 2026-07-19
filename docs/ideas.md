@@ -63,14 +63,6 @@ Ya sea poniendo marcadores en una barra de desplazamiento de video. O también c
 
 7. Hacer que los placeholders sean en cursiva y del mismo color tenue. Porque noto que la cadena "Selecciona el archivo de video…" es más tenue que las otras. ¿Se puede hacer un tono intermedio entre ambos colores?
 
-8. Agregar fallbacks a otras APIs:
-- **Problema**: Solo usa Jikan (MAL). Si MAL no tiene datos o hay rate limits, falla.
-- **Mejora**: Agregar fallback a AniList (otra API popular) si Jikan falla. AniList tiene mejor soporte para relaciones de series.
-- **Implementación**: Crear función buscar_en_anilist similar a jikan_buscar_anime, y llamarla si Jikan retorna vacío.
-- **Beneficio**: Más confiabilidad, menos "Slug vacío" errors.
-
-9. Jikan como fallback — la observación es correcta: AnimeThemes ya resolvió bien sin Jikan en ese caso. Pero cambiar la arquitectura de Jikan ahora es más invasivo. Lo más pragmático por ahora es mejorar la sanitización del filename y el formato, y dejar la refactorización de Jikan para cuando hagamos la separación en módulos.
-
 ---
 
 11. Mejoras de UX pendientes — directorios persistentes por campo (como en SincroNyaa) y drag & drop en el campo de video.

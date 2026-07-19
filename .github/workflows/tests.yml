@@ -1,3 +1,4 @@
+# Workflow verificado corriendo de punta a punta en GitHub Actions el 2026-07-19.
 name: Tests
 
 on:

@@ -22,11 +22,21 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v6
         with:
-          # Piso real declarado en pyproject.toml (requires-python).
-          # Distinto de la version (3.13) con la que se valido el .exe
-          # a mano -- esta es la primera corrida real de este workflow,
-          # tratarla como una prueba, no asumir que sale igual.
-          python-version: "3.11"
+          # 3.13, NO el piso de 3.11 que usa tests.yml -- deliberado.
+          # Primera prueba con 3.11 (tag v0.0.1-test-ci) dio un .exe de
+          # 142.4MB vs los 131.9MB de la build local ya validada de
+          # punta a punta (matching de audio real, GUI automatizada).
+          # Confirmado por log que las dependencias resueltas fueron
+          # IDENTICAS en ambos casos (pyinstaller, numba, llvmlite,
+          # scikit-learn, etc, mismas versiones) -- la diferencia es
+          # unicamente el ABI de Python (cp311 vs cp313), no una
+          # dependencia sin pinear. Se usa 3.13 aca para que el .exe
+          # publicado coincida con el que ya se valido, no solo con
+          # tests unitarios. tests.yml sigue en 3.11 (el piso real
+          # declarado en pyproject.toml, para quien instala desde
+          # codigo fuente vía pip -- audiencia distinta a quien
+          # descarga el .exe).
+          python-version: "3.13"
           cache: pip
 
       - name: Instalar dependencias de Python

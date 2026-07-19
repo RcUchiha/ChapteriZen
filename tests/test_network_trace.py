@@ -7,8 +7,6 @@ Las respuestas se enrutan segun el contenido del cuerpo de cada POST
 llegada -- los frames de un mismo lote se envian en paralelo via
 ThreadPoolExecutor y su orden de ejecucion no esta garantizado.
 """
-import json
-
 import httpx
 import pytest
 import respx
